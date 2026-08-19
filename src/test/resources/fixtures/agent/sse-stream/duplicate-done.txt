@@ -1,0 +1,12 @@
+event: delta
+id: 1
+data: {"seq":1,"messageId":"106","text":"报销单最多可以延迟 30 天提交。"}
+
+event: done
+id: 2
+data: {"seq":2,"messageId":"106","status":"COMPLETED","finishReason":"STOP","steps":1,"content":"报销单最多可以延迟 30 天提交。"}
+
+event: done
+id: 3
+data: {"seq":3,"messageId":"106","status":"COMPLETED","finishReason":"STOP","steps":1,"content":"报销单最多可以延迟 30 天提交。"}
+

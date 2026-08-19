@@ -1,0 +1,64 @@
+{
+  "$comment": "多轮序列样本。responses[] 的每个元素是一次模型调用的完整响应，结构与 model-response/ 下的单次样本相同。",
+  "scenario": "第 1 步请求越权知识库得到 NOT_FOUND，第 2 步模型改用有权知识库并成功，第 3 步给出带引用的最终回答。验证工具失败不终止轮次，且失败的那一步不污染最终结果。",
+  "responses": [
+    {
+      "id": "chatcmpl-fixture-recover-1",
+      "object": "chat.completion",
+      "created": 1769385721,
+      "model": "fixture-model-v1",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "refusal": null,
+            "tool_calls": [
+              {"id": "call_1", "type": "function", "function": {"name": "kb_search", "arguments": "{\"query\": \"报销单 提交 时限\", \"knowledgeBaseId\": \"999\", \"topK\": 5}"}}
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    {
+      "id": "chatcmpl-fixture-recover-2",
+      "object": "chat.completion",
+      "created": 1769385722,
+      "model": "fixture-model-v1",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "refusal": null,
+            "tool_calls": [
+              {"id": "call_2", "type": "function", "function": {"name": "kb_search", "arguments": "{\"query\": \"报销单 提交 时限\", \"knowledgeBaseId\": \"1\", \"topK\": 5}"}}
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    {
+      "id": "chatcmpl-fixture-recover-3",
+      "object": "chat.completion",
+      "created": 1769385723,
+      "model": "fixture-model-v1",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "报销单最多可以延迟 30 天提交[^1]。",
+            "refusal": null,
+            "tool_calls": null
+          },
+          "finish_reason": "stop"
+        }
+      ]
+    }
+  ]
+}

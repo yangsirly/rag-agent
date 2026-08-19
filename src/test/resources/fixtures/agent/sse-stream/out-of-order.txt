@@ -1,0 +1,16 @@
+event: delta
+id: 1
+data: {"seq":1,"messageId":"105","text":"我先在知识库里查一下。"}
+
+event: tool_result
+id: 2
+data: {"seq":2,"messageId":"105","callId":"call_1","status":"OK","durationMs":42,"result":{"hits":[{"docId":"1/3","chunkId":null,"score":0.83}]}}
+
+event: tool_call
+id: 3
+data: {"seq":3,"messageId":"105","callId":"call_1","step":1,"name":"kb_search","arguments":{"query":"报销单 提交 时限","knowledgeBaseId":"1","topK":5}}
+
+event: done
+id: 4
+data: {"seq":4,"messageId":"105","status":"COMPLETED","finishReason":"STOP","steps":1,"content":"我先在知识库里查一下。"}
+

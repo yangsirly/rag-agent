@@ -1,0 +1,32 @@
+{
+  "id": "chatcmpl-fixture-malformed-json-args",
+  "object": "chat.completion",
+  "created": 1769385607,
+  "model": "fixture-model-v1",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "refusal": null,
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+              "name": "kb_search",
+              "arguments": "{\"query\": \"报销单 提交 时限\", \"knowledgeBaseId\": "
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 318,
+    "completion_tokens": 31,
+    "total_tokens": 349
+  }
+}

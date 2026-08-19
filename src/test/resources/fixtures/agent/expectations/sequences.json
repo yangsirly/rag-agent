@@ -1,0 +1,91 @@
+{
+  "$comment": "model-response/sequences/ 各多轮序列样本的期望判定结果。这三条支撑批次 3 的「步数与失败路径」分组；该组还有依赖待定项 T-3（整轮墙钟预算）、T-4（同步 vs 队列）的用例，fixture 表达不了，见 ../README.md 第 2.1 节。",
+  "protocolVersion": "agent-protocol.md v0.2",
+  "assumedConfig": {
+    "maxSteps": 6,
+    "identicalCallThreshold": 3,
+    "parallelToolCallLimit": 4
+  },
+  "fixtures": [
+    {
+      "file": "step-limit-loop.json",
+      "scenario": "连续 6 次请求工具调用，触达 maxSteps",
+      "responseCount": 6,
+      "expectedSteps": 6,
+      "expectedToolCallsExecuted": 6,
+      "expectedTurnOutcome": "FAILED",
+      "expectedErrorCode": "AGENT_STEP_LIMIT_EXCEEDED",
+      "expectedRetryable": false,
+      "expectedPartialContent": "我先查一下报销时限。",
+      "deathLoopDetected": false,
+      "protocolRefs": ["5.7 maxSteps=6", "3.4 INV-M7", "3.4 INV-M5", "6 AGENT_STEP_LIMIT_EXCEEDED"],
+      "note": "6 次 query 各不相同，因此死循环检测不得先于步数上限触发——deathLoopDetected 恒为 false 是这条的判别力所在。关键断言是 INV-M7：第 1 步产出的正文必须已落库；以及 INV-M5：6 个工具调用都要有终态，不允许残留 RUNNING。协议 5.7 节明确选择整轮 FAILED 而不是强制收尾生成。"
+    },
+    {
+      "file": "identical-repeat.json",
+      "scenario": "连续 3 次语义相同的 kb_search，触发死循环检测",
+      "responseCount": 3,
+      "expectedSteps": 3,
+      "expectedToolCallsExecuted": 3,
+      "expectedTurnOutcome": "FAILED",
+      "expectedErrorCode": "AGENT_STEP_LIMIT_EXCEEDED",
+      "expectedRetryable": false,
+      "expectedPartialContent": "",
+      "deathLoopDetected": true,
+      "deathLoopDetectedAtStep": 3,
+      "normalizedArgumentsAllEqual": true,
+      "normalizedArguments": {
+        "knowledgeBaseId": "1",
+        "query": "报销单 提交 时限",
+        "topK": 5
+      },
+      "protocolRefs": ["5.7 死循环检测", "7.4 argsHash 规范化", "5.3 integer 接受 5.0", "3.4 INV-M7"],
+      "note": "三次调用的 arguments 属性顺序各不相同，第三次的 topK 还写成 5.0。三者规范化后必须完全相等（属性名字典序 + 数值规范化）。直接对 arguments 原始字符串比较的实现会漏判，并白烧掉剩余 3 步预算——这正是本条要拦的。失败发生在第 3 步而不是第 6 步，是它与 step-limit-loop 的分界。expectedPartialContent 为空字符串而不是 null（INV-M7）。"
+    },
+    {
+      "file": "tool-error-then-recover.json",
+      "scenario": "工具越权失败 → 模型换参数 → 成功收尾",
+      "responseCount": 3,
+      "expectedSteps": 3,
+      "expectedToolCallsExecuted": 2,
+      "expectedTurnOutcome": "COMPLETED",
+      "expectedFinishReason": "STOP",
+      "expectedContent": "报销单最多可以延迟 30 天提交[^1]。",
+      "expectedCitationCount": 1,
+      "deathLoopDetected": false,
+      "toolResults": [
+        {"callId": "call_1", "status": "ERROR", "code": "NOT_FOUND", "messageIsTemplate": true},
+        {"callId": "call_2", "status": "OK"}
+      ],
+      "protocolRefs": ["5.6 resourceScope=KNOWLEDGE_BASE_GRANT", "5.6 无害化文案", "5.7 工具失败不终止轮次", "4.3 INV-C1", "3.4 INV-M6"],
+      "note": "两个断言方向：一是工具失败不终止轮次（call_1 拿到 NOT_FOUND 后轮次继续）；二是失败那一步不污染最终结果（最终只有 1 条 citation，来自 call_2；库里不得留下指向知识库 999 的引用）。call_1 的 message 必须是 5.6 节的固定模板，不得透露知识库 999 是否存在。"
+    }
+  ],
+  "notCoveredByFixture": [
+    {
+      "case": "单次模型调用超时（60 秒）",
+      "reason": "时间行为，fixture 表达不了，需要可控的 Clock 与模型客户端替身",
+      "protocolRef": "2.9"
+    },
+    {
+      "case": "单次工具执行超时（默认 3000 ms）",
+      "reason": "同上；且需要一个能被挂起的工具替身",
+      "protocolRef": "2.9、5.1 timeoutMs"
+    },
+    {
+      "case": "服务端自动重试（failureMode=RETRYABLE 且 sideEffect=false，至多 1 次）",
+      "reason": "重试发生在工具执行层，模型响应序列观察不到；需要一个前 N 次失败、之后成功的工具替身",
+      "protocolRef": "5.7"
+    },
+    {
+      "case": "取消",
+      "reason": "需要并发时序控制（cancel 与生成并行），fixture 是静态数据",
+      "protocolRef": "3.6"
+    },
+    {
+      "case": "整轮墙钟预算超出",
+      "reason": "待定项 T-3 未决，尚无可断言的约定",
+      "protocolRef": "8 T-3"
+    }
+  ]
+}

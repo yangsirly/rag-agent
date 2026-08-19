@@ -1,0 +1,23 @@
+{
+  "id": "chatcmpl-fixture-plain-text",
+  "object": "chat.completion",
+  "created": 1769385600,
+  "model": "fixture-model-v1",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "你好，我可以在你有权访问的知识库里查资料并给出带引用的回答。请问你想了解什么？",
+        "refusal": null,
+        "tool_calls": null
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 312,
+    "completion_tokens": 27,
+    "total_tokens": 339
+  }
+}

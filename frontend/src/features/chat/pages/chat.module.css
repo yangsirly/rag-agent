@@ -1,0 +1,139 @@
+.chatLayout {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  gap: 0;
+}
+
+.sidebarPane {
+  width: 300px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--app-border);
+  background: var(--app-surface);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mainPane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--app-bg);
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 12px;
+  gap: 12px;
+}
+
+.sidebarHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.conversationList {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.conversationItem {
+  cursor: pointer;
+  border-radius: 10px;
+  padding-inline: 8px !important;
+}
+
+.conversationItem:hover {
+  background: color-mix(in srgb, var(--app-primary) 8%, transparent);
+}
+
+.active {
+  background: color-mix(in srgb, var(--app-primary) 14%, transparent);
+}
+
+.loadMore {
+  display: grid;
+  place-items: center;
+  padding: 8px 0;
+}
+
+.messageList {
+  flex: 1;
+  overflow: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.loadOlder {
+  display: grid;
+  place-items: center;
+  margin-bottom: 8px;
+}
+
+.emptyMessages {
+  margin: auto;
+  text-align: center;
+}
+
+.bubble {
+  max-width: min(720px, 92%);
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface);
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.user {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--app-primary) 12%, var(--app-surface));
+}
+
+.assistant {
+  align-self: flex-start;
+}
+
+.bubbleMeta {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.bubbleContent {
+  line-height: 1.6;
+}
+
+.composer {
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--app-border);
+  background: var(--app-surface);
+  align-items: flex-end;
+}
+
+.placeholder {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+@media (max-width: 767px) {
+  .sidebarPane {
+    display: none;
+  }
+}

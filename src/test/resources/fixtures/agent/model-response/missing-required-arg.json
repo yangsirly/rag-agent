@@ -1,0 +1,32 @@
+{
+  "id": "chatcmpl-fixture-missing-required-arg",
+  "object": "chat.completion",
+  "created": 1769385604,
+  "model": "fixture-model-v1",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "refusal": null,
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+              "name": "kb_search",
+              "arguments": "{\"query\": \"报销单 提交 时限\", \"topK\": 5}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 318,
+    "completion_tokens": 29,
+    "total_tokens": 347
+  }
+}

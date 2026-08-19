@@ -1,0 +1,5 @@
+{"id":"RET-001","query":"报销单最多可以延迟多少天提交","relevantDocIds":["kb-1/doc-3"],"relevantChunkIds":[],"note":"chunkId 在分块策略定型后回填","tags":["单跳","事实型"]}
+{"id":"RET-002","query":"逾期提交报销单需要补什么材料","relevantDocIds":["kb-1/doc-3"],"relevantChunkIds":[],"note":"答案在 doc-3 第三条：需附部门负责人书面说明","tags":["单跳","事实型"]}
+{"id":"RET-003","query":"出差申请审批和报销凭证要求分别在哪份文件里规定","relevantDocIds":["kb-1/doc-1","kb-1/doc-3"],"relevantChunkIds":[],"note":"多跳：需要同时命中差旅申请流程与报销管理办法两篇","tags":["多跳"]}
+{"id":"RET-004","query":"实习生可以报销市内交通费吗","relevantDocIds":["kb-1/doc-5"],"relevantChunkIds":[],"note":"否定型：doc-5 实习生管理规定明确市内交通费不予报销","tags":["单跳","否定型"]}
+{"id":"RET-005","query":"公司每年有多少天年假","relevantDocIds":[],"relevantChunkIds":[],"note":"无答案：知识库中不存在年假制度文档，检索不应产生高置信命中","tags":["无答案"]}

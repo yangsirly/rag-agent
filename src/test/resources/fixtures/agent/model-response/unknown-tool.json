@@ -1,0 +1,32 @@
+{
+  "id": "chatcmpl-fixture-unknown-tool",
+  "object": "chat.completion",
+  "created": 1769385603,
+  "model": "fixture-model-v1",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "refusal": null,
+        "tool_calls": [
+          {
+            "id": "call_9",
+            "type": "function",
+            "function": {
+              "name": "send_email",
+              "arguments": "{\"to\": \"finance@example.invalid\", \"subject\": \"报销单时限\", \"body\": \"见附件\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 316,
+    "completion_tokens": 41,
+    "total_tokens": 357
+  }
+}

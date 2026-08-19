@@ -1,0 +1,48 @@
+{
+  "id": "chatcmpl-fixture-parallel-tool-calls",
+  "object": "chat.completion",
+  "created": 1769385602,
+  "model": "fixture-model-v1",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "refusal": null,
+        "tool_calls": [
+          {
+            "id": "call_a",
+            "type": "function",
+            "function": {
+              "name": "kb_search",
+              "arguments": "{\"query\": \"报销单 提交 时限\", \"knowledgeBaseId\": \"1\", \"topK\": 5}"
+            }
+          },
+          {
+            "id": "call_b",
+            "type": "function",
+            "function": {
+              "name": "kb_search",
+              "arguments": "{\"query\": \"报销单 逾期 审批\", \"knowledgeBaseId\": \"1\", \"topK\": 3}"
+            }
+          },
+          {
+            "id": "call_c",
+            "type": "function",
+            "function": {
+              "name": "doc_fetch",
+              "arguments": "{\"docId\": \"1/3\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 320,
+    "completion_tokens": 78,
+    "total_tokens": 398
+  }
+}

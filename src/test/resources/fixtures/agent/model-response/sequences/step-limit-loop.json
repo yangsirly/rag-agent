@@ -1,0 +1,126 @@
+{
+  "$comment": "多轮序列样本。responses[] 的每个元素是一次模型调用的完整响应，结构与 model-response/ 下的单次样本相同；外层包装是必要的，因为序列本身不是任何 SDK 会返回的结构。",
+  "scenario": "模型连续 6 次请求工具调用，触达 maxSteps=6；每次 query 不同，刻意避开死循环检测",
+  "responses": [
+    {
+      "id": "chatcmpl-fixture-step-limit-1",
+      "object": "chat.completion",
+      "created": 1769385701,
+      "model": "fixture-model-v1",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "我先查一下报销时限。",
+            "refusal": null,
+            "tool_calls": [
+              {"id": "call_1", "type": "function", "function": {"name": "kb_search", "arguments": "{\"query\": \"报销单 提交 时限\", \"knowledgeBaseId\": \"1\", \"topK\": 5}"}}
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    {
+      "id": "chatcmpl-fixture-step-limit-2",
+      "object": "chat.completion",
+      "created": 1769385702,
+      "model": "fixture-model-v1",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "refusal": null,
+            "tool_calls": [
+              {"id": "call_2", "type": "function", "function": {"name": "kb_search", "arguments": "{\"query\": \"报销单 逾期 审批\", \"knowledgeBaseId\": \"1\", \"topK\": 5}"}}
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    {
+      "id": "chatcmpl-fixture-step-limit-3",
+      "object": "chat.completion",
+      "created": 1769385703,
+      "model": "fixture-model-v1",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "refusal": null,
+            "tool_calls": [
+              {"id": "call_3", "type": "function", "function": {"name": "kb_search", "arguments": "{\"query\": \"费用 发生日 定义\", \"knowledgeBaseId\": \"1\", \"topK\": 5}"}}
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    {
+      "id": "chatcmpl-fixture-step-limit-4",
+      "object": "chat.completion",
+      "created": 1769385704,
+      "model": "fixture-model-v1",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "refusal": null,
+            "tool_calls": [
+              {"id": "call_4", "type": "function", "function": {"name": "kb_search", "arguments": "{\"query\": \"部门负责人 书面说明\", \"knowledgeBaseId\": \"1\", \"topK\": 5}"}}
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    {
+      "id": "chatcmpl-fixture-step-limit-5",
+      "object": "chat.completion",
+      "created": 1769385705,
+      "model": "fixture-model-v1",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "refusal": null,
+            "tool_calls": [
+              {"id": "call_5", "type": "function", "function": {"name": "doc_fetch", "arguments": "{\"docId\": \"1/3\"}"}}
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    {
+      "id": "chatcmpl-fixture-step-limit-6",
+      "object": "chat.completion",
+      "created": 1769385706,
+      "model": "fixture-model-v1",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "refusal": null,
+            "tool_calls": [
+              {"id": "call_6", "type": "function", "function": {"name": "doc_fetch", "arguments": "{\"docId\": \"1/7\"}"}}
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    }
+  ]
+}

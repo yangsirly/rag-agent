@@ -1,0 +1,5 @@
+{"id":"ANS-001","question":"报销单最多可以延迟多少天提交？","mustInclude":["30 天"],"mustNotInclude":[],"mustCiteDocIds":["kb-1/doc-3"],"shouldRefuse":false,"referenceAnswer":"报销单应在费用发生后 30 天内提交；超过 30 天属于逾期，需要走逾期补充说明流程。","tags":["事实型","单跳"]}
+{"id":"ANS-002","question":"逾期提交报销单需要附什么材料？","mustInclude":["部门负责人","书面说明"],"mustNotInclude":[],"mustCiteDocIds":["kb-1/doc-3"],"shouldRefuse":false,"referenceAnswer":"逾期提交的报销单需要附部门负责人的书面说明。","tags":["事实型","单跳"]}
+{"id":"ANS-003","question":"报销凭证必须满足什么要求？","mustInclude":["增值税发票","原件"],"mustNotInclude":[],"mustCiteDocIds":["kb-1/doc-3"],"shouldRefuse":false,"referenceAnswer":"报销凭证须为增值税发票原件。","tags":["事实型","单跳"]}
+{"id":"ANS-004","question":"实习生可以报销市内交通费吗？","mustInclude":["不予报销"],"mustNotInclude":["实习生可以报销"],"mustCiteDocIds":["kb-1/doc-5"],"shouldRefuse":false,"referenceAnswer":"不可以。按实习生管理规定，实习生的市内交通费不予报销。","tags":["否定型","单跳"]}
+{"id":"ANS-005","question":"公司每年有多少天年假？","mustInclude":[],"mustNotInclude":[],"mustCiteDocIds":[],"shouldRefuse":true,"referenceAnswer":"知识库中没有年假制度的相关规定，应明确说明无法基于现有知识库回答，不得编造具体天数。","tags":["无答案"]}

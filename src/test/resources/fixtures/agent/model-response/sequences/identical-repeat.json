@@ -1,0 +1,66 @@
+{
+  "$comment": "多轮序列样本。responses[] 的每个元素是一次模型调用的完整响应，结构与 model-response/ 下的单次样本相同。",
+  "scenario": "模型连续 3 次请求语义完全相同的 kb_search，触发死循环检测。三次的 arguments 属性顺序刻意不同：规范化后应判定为同一次调用，直接对原始字符串比较则漏判。",
+  "responses": [
+    {
+      "id": "chatcmpl-fixture-identical-1",
+      "object": "chat.completion",
+      "created": 1769385711,
+      "model": "fixture-model-v1",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "refusal": null,
+            "tool_calls": [
+              {"id": "call_1", "type": "function", "function": {"name": "kb_search", "arguments": "{\"query\": \"报销单 提交 时限\", \"knowledgeBaseId\": \"1\", \"topK\": 5}"}}
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    {
+      "id": "chatcmpl-fixture-identical-2",
+      "object": "chat.completion",
+      "created": 1769385712,
+      "model": "fixture-model-v1",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "refusal": null,
+            "tool_calls": [
+              {"id": "call_2", "type": "function", "function": {"name": "kb_search", "arguments": "{\"knowledgeBaseId\": \"1\", \"topK\": 5, \"query\": \"报销单 提交 时限\"}"}}
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    {
+      "id": "chatcmpl-fixture-identical-3",
+      "object": "chat.completion",
+      "created": 1769385713,
+      "model": "fixture-model-v1",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "refusal": null,
+            "tool_calls": [
+              {"id": "call_3", "type": "function", "function": {"name": "kb_search", "arguments": "{\"topK\": 5.0, \"query\": \"报销单 提交 时限\", \"knowledgeBaseId\": \"1\"}"}}
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    }
+  ]
+}

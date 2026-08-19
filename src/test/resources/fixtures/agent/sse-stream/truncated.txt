@@ -1,0 +1,12 @@
+event: delta
+id: 1
+data: {"seq":1,"messageId":"104","text":"报销单"}
+
+event: delta
+id: 2
+data: {"seq":2,"messageId":"104","text":"最多可以延迟 "}
+
+:hb
+
+:hb
+

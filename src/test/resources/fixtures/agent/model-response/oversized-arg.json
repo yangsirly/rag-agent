@@ -1,0 +1,32 @@
+{
+  "id": "chatcmpl-fixture-oversized-arg",
+  "object": "chat.completion",
+  "created": 1769385610,
+  "model": "fixture-model-v1",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "refusal": null,
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+              "name": "kb_search",
+              "arguments": "{\"query\": \"expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-expense-report-submission-deadline-policy-lookup-\", \"knowledgeBaseId\": \"1\", \"topK\": 5}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 318,
+    "completion_tokens": 612,
+    "total_tokens": 930
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "chatcmpl-fixture-refusal",
+  "object": "chat.completion",
+  "created": 1769385608,
+  "model": "fixture-model-v1",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "refusal": "我在你有权访问的知识库里没有找到关于这个问题的依据，无法给出可靠答案。",
+        "tool_calls": null
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 402,
+    "completion_tokens": 24,
+    "total_tokens": 426
+  }
+}

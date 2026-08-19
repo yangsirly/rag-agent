@@ -1,0 +1,184 @@
+{
+  "$comment": "model-response/ 各样本的期望判定结果。样本文件本身保持与 SDK 响应结构一致，不掺测试元数据，因此期望值放在这里。字段口径见同目录 ../README.md 第 4 节。",
+  "protocolVersion": "agent-protocol.md v0.2",
+  "fixtures": [
+    {
+      "file": "plain-text.json",
+      "scenario": "纯文本回复，不调工具",
+      "expectedToolCallCount": 0,
+      "expectedFinishReason": "STOP",
+      "expectedTurnOutcome": "COMPLETED",
+      "expectedContent": "你好，我可以在你有权访问的知识库里查资料并给出带引用的回答。请问你想了解什么？",
+      "toolCalls": [],
+      "protocolRefs": ["2.6 finishReason=STOP", "3.1 STREAMING → COMPLETED"],
+      "note": "直接落库为 ASSISTANT 消息，content 非空满足 INV-M4。"
+    },
+    {
+      "file": "single-tool-call.json",
+      "scenario": "单个合法工具调用",
+      "expectedToolCallCount": 1,
+      "expectedFinishReason": null,
+      "expectedTurnOutcome": "CONTINUES",
+      "toolCalls": [
+        {
+          "callId": "call_1",
+          "name": "kb_search",
+          "valid": true,
+          "code": null,
+          "reason": null,
+          "normalizedArguments": {
+            "knowledgeBaseId": "1",
+            "query": "报销单 提交 时限",
+            "topK": 5
+          }
+        }
+      ],
+      "protocolRefs": ["5.1 kb_search 注册条目", "5.4 全部 7 步通过"],
+      "note": "normalizedArguments 按 7.4 节的规范化规则给出（属性名字典序、去未定义属性、数值规范化），是 argsHash 的输入。"
+    },
+    {
+      "file": "parallel-tool-calls.json",
+      "scenario": "一次返回多个工具调用",
+      "expectedToolCallCount": 3,
+      "expectedFinishReason": null,
+      "expectedTurnOutcome": "CONTINUES",
+      "toolCalls": [
+        {"callId": "call_a", "name": "kb_search", "valid": true, "code": null, "reason": null},
+        {"callId": "call_b", "name": "kb_search", "valid": true, "code": null, "reason": null},
+        {"callId": "call_c", "name": "doc_fetch", "valid": true, "code": null, "reason": null}
+      ],
+      "protocolRefs": ["5.7 单步并行工具调用数上限 4", "2.8 INV-S3", "2.8 INV-S4"],
+      "note": "3 个调用未触达上限 4，因此三个都应执行。断言重点是结果与 callId 的配对，而不是执行顺序。"
+    },
+    {
+      "file": "unknown-tool.json",
+      "scenario": "调用不存在的工具名（模型幻觉）",
+      "expectedToolCallCount": 1,
+      "expectedFinishReason": null,
+      "expectedTurnOutcome": "CONTINUES",
+      "toolCalls": [
+        {"callId": "call_9", "name": "send_email", "valid": false, "code": "TOOL_NOT_FOUND", "reason": null}
+      ],
+      "protocolRefs": ["5.4 序 1", "6 TOOL_NOT_FOUND", "2.3 不存在的工具名也要发 tool_call"],
+      "note": "关键断言是轮次不进入 FAILED，且仍发出 tool_call 事件（原样回显工具名），保持 INV-S3 无例外。"
+    },
+    {
+      "file": "missing-required-arg.json",
+      "scenario": "缺必填参数 knowledgeBaseId",
+      "expectedToolCallCount": 1,
+      "expectedFinishReason": null,
+      "expectedTurnOutcome": "CONTINUES",
+      "toolCalls": [
+        {
+          "callId": "call_1",
+          "name": "kb_search",
+          "valid": false,
+          "code": "TOOL_ARGUMENT_INVALID",
+          "reason": "MISSING_REQUIRED",
+          "details": ["knowledgeBaseId"]
+        }
+      ],
+      "protocolRefs": ["5.4 序 4", "6 TOOL_ARGUMENT_INVALID"],
+      "note": "只违反一条，reason 唯一确定。"
+    },
+    {
+      "file": "wrong-arg-type.json",
+      "scenario": "topK 传字符串 \"5\"，类型不符 schema",
+      "expectedToolCallCount": 1,
+      "expectedFinishReason": null,
+      "expectedTurnOutcome": "CONTINUES",
+      "toolCalls": [
+        {
+          "callId": "call_1",
+          "name": "kb_search",
+          "valid": false,
+          "code": "TOOL_ARGUMENT_INVALID",
+          "reason": "TYPE_MISMATCH",
+          "details": ["topK"]
+        }
+      ],
+      "protocolRefs": ["5.4 序 6", "5.4 不做隐式类型转换"],
+      "note": "任何把 \"5\" 转成 5 的实现都会让这条变绿而实际上放宽了契约——这正是本 fixture 要守的东西。"
+    },
+    {
+      "file": "extra-unknown-arg.json",
+      "scenario": "多出 schema 未定义的参数 filter",
+      "expectedToolCallCount": 1,
+      "expectedFinishReason": null,
+      "expectedTurnOutcome": "CONTINUES",
+      "toolCalls": [
+        {
+          "callId": "call_1",
+          "name": "kb_search",
+          "valid": false,
+          "code": "TOOL_ARGUMENT_INVALID",
+          "reason": "UNKNOWN_PROPERTY",
+          "details": ["filter"]
+        }
+      ],
+      "protocolRefs": ["5.3 additionalProperties 必须显式 false", "5.4 序 5"],
+      "note": "计划第 3.1 节留的\"忽略 or 拒绝\"这个待定，协议 5.3 节已定死为拒绝。"
+    },
+    {
+      "file": "oversized-arg.json",
+      "scenario": "query 长度 2352 码点，超过单属性 2000 码点上限",
+      "expectedToolCallCount": 1,
+      "expectedFinishReason": null,
+      "expectedTurnOutcome": "CONTINUES",
+      "toolCalls": [
+        {
+          "callId": "call_1",
+          "name": "kb_search",
+          "valid": false,
+          "code": "TOOL_ARGUMENT_INVALID",
+          "reason": "TOO_LARGE",
+          "details": ["query"]
+        }
+      ],
+      "protocolRefs": ["5.4 序 3", "5.4 第 3 步的日志约束"],
+      "note": "arguments 序列化后 2400 字节 < 8 KiB，因此只命中\"单个字符串属性超长\"这一子条件，reason 唯一。附带断言：日志只记工具名+属性名+长度，不记参数值。"
+    },
+    {
+      "file": "malformed-json-args.json",
+      "scenario": "arguments 字符串不是合法 JSON（被截断）",
+      "expectedToolCallCount": 1,
+      "expectedFinishReason": null,
+      "expectedTurnOutcome": "CONTINUES",
+      "toolCalls": [
+        {
+          "callId": "call_1",
+          "name": "kb_search",
+          "valid": false,
+          "code": "TOOL_ARGUMENT_INVALID",
+          "reason": "MALFORMED_JSON",
+          "argumentsInvalid": true,
+          "emittedArguments": null
+        }
+      ],
+      "protocolRefs": ["5.4 序 2", "2.3 argumentsInvalid"],
+      "note": "解析失败但可恢复：tool_call 事件仍要发出，arguments 置 null 且 argumentsInvalid=true。"
+    },
+    {
+      "file": "refusal.json",
+      "scenario": "模型拒答",
+      "expectedToolCallCount": 0,
+      "expectedFinishReason": "REFUSAL",
+      "expectedTurnOutcome": "COMPLETED",
+      "expectedContent": "我在你有权访问的知识库里没有找到关于这个问题的依据，无法给出可靠答案。",
+      "toolCalls": [],
+      "protocolRefs": ["2.6 REFUSAL 必须是 COMPLETED"],
+      "note": "落库 status=COMPLETED、errorCode=null。记成 FAILED 会让\"应拒答召回率\"指标永远刷不上去。content 取 refusal 字段文本，非空满足 INV-M4。"
+    },
+    {
+      "file": "empty-content.json",
+      "scenario": "返回空内容且无工具调用",
+      "expectedToolCallCount": 0,
+      "expectedFinishReason": null,
+      "expectedTurnOutcome": "FAILED",
+      "expectedErrorCode": "MODEL_UNAVAILABLE",
+      "toolCalls": [],
+      "protocolRefs": ["6 MODEL_UNAVAILABLE", "3.4 INV-M4", "8 待定项 T-7"],
+      "note": "不得落一条 content 为空的 COMPLETED 消息（INV-M4）。若 T-7 定为新增 MODEL_EMPTY_RESPONSE，只需改本条 expectedErrorCode，样本文件不动。"
+    }
+  ]
+}
