@@ -8,17 +8,18 @@ import java.time.format.DateTimeFormatter;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import yangsirly.rag_agent.common.exception.InvalidConversationRequestException;
 
 /**
  * 会话业务边界。
  *
  * <p>
- * 里程碑 3 最小闭环：创建会话（供发送消息前使用）。
- * 列表 / 改标题 / 删除属于里程碑 4，这里只保留方法签名与 TODO，避免前端契约路径完全空缺时无入口。
- * </p>
- *
- * <p>
- * 学习笔记（后续补充）：所有权查询、物理删除与外键级联。
+ * 工业级改造：list/rename/delete 补齐实现，删除改为"消息分批软删（各自独立事务）+
+ * 会话软删"，避免 ON DELETE CASCADE 大事务，同时保持外键完整性
+ * （V3 外键为 RESTRICT，V5 会话增加 deleted_at）。
+ * 学习笔记：docs/learning/milestone-06-industrial-hardening.md#3.1
  * </p>
  */
 @Service
@@ -30,35 +31,36 @@ public class ConversationService {
 	private static final int MIN_TITLE_LENGTH = 1;
 	private static final int MAX_TITLE_LENGTH = 100;
 
-	private final ConversationMapper conversationMapper;
-	private final Clock clock;
+	/** 每批软删的消息行数：限制单条 UPDATE 的持锁范围。 */
+	private static final int MESSAGE_DELETE_BATCH = 1000;
 
-	/**
-	 * @param conversationMapper 会话持久化
-	 * @param clock              时间来源；注入 {@link Clock} 便于测试固定时间，而不是直接调用
-	 *                           {@code LocalDateTime.now()}
-	 */
-	public ConversationService(ConversationMapper conversationMapper, Clock clock) {
+	private final ConversationMapper conversationMapper;
+	private final MessageMapper messageMapper;
+	private final Clock clock;
+	private final TransactionTemplate transactionTemplate;
+
+	public ConversationService(
+			ConversationMapper conversationMapper,
+			MessageMapper messageMapper,
+			Clock clock,
+			TransactionTemplate transactionTemplate) {
 		this.conversationMapper = conversationMapper;
+		this.messageMapper = messageMapper;
 		this.clock = clock;
+		this.transactionTemplate = transactionTemplate;
 	}
 
 	/**
-	 * 为当前用户创建会话。
+	 * 创建会话。
 	 *
 	 * <p>
-	 * 成功路径：
-	 * <ol>
-	 * <li>规范化并校验标题（缺省 → 默认标题）；</li>
-	 * <li>插入 conversations 行，userId 来自已认证主体；</li>
-	 * <li>返回可序列化为 {@link ConversationResponse} 的视图数据。</li>
-	 * </ol>
+	 * 创建时同时写入 createdAt/updatedAt，确保后续列表排序稳定。
 	 * </p>
 	 */
 	@Transactional
 	public ConversationView create(CreateConversationCommand command) {
 		if (command == null || command.userId() == null) {
-			throw new IllegalArgumentException("Conversation command and userId must not be null");
+			throw new InvalidConversationRequestException("Conversation command and userId must not be null");
 		}
 		ConversationEntity entity = new ConversationEntity(command.userId(), normalizeTitle(command.title()));
 		LocalDateTime now = LocalDateTime.now(clock);
@@ -72,7 +74,7 @@ public class ConversationService {
 	}
 
 	/**
-	 * 按 id 读取当前用户可见的会话；不可见统一视为不存在。
+	 * 按用户归属读取单个会话。
 	 */
 	@Transactional(readOnly = true)
 	public ConversationView getOwned(Long userId, Long conversationId) {
@@ -83,49 +85,96 @@ public class ConversationService {
 		return new ConversationView(entity.getId(), entity.getTitle(), entity.getCreatedAt(), entity.getUpdatedAt());
 	}
 
-	// -------------------------------------------------------------------------
-	// 以下为里程碑 4 入口占位，避免 Controller 契约路径悬空；实现时删除 throw。
-	// -------------------------------------------------------------------------
-
-	/** 当前用户的会话列表（updatedAt DESC, id DESC）。 */
-	@Transactional(readOnly = true)
-	public ConversationPage list(Long userId, int page, int size) {
-		// TODO(里程碑 4)：校验 page/size；查询分页 + total；组装 ConversationPage
-		throw new UnsupportedOperationException("TODO: implement ConversationService.list (milestone 4)");
-	}
-
-	/** 修改本人会话标题。 */
-	@Transactional
-	public ConversationView rename(Long userId, Long conversationId, String title) {
-		// TODO(里程碑 4)：所有权校验 + 标题校验 + 更新 + 返回最新视图
-		throw new UnsupportedOperationException("TODO: implement ConversationService.rename (milestone 4)");
-	}
-
 	/**
-	 * 物理删除本人会话；消息由外键 ON DELETE CASCADE 一并删除。
+	 * 分页查询当前用户会话列表。
 	 *
 	 * <p>
-	 * 首次删除成功；再次删除同一 id → {@link ConversationNotFoundException}。
+	 * 采用 offset 分页，并限制深分页以避免大 offset 全表扫描。
 	 * </p>
 	 */
-	@Transactional
-	public void delete(Long userId, Long conversationId) {
-		// TODO(里程碑 4)：findByIdAndUserId；null → not found；deleteById；断言删除 1 行
-		throw new UnsupportedOperationException("TODO: implement ConversationService.delete (milestone 4)");
+	@Transactional(readOnly = true)
+	public ConversationPage list(Long userId, int page, int size) {
+		if (userId == null) {
+			throw new InvalidConversationRequestException("userId must not be null");
+		}
+		if (page < 0 || size < 1 || size > 100) {
+			throw new InvalidConversationRequestException("Invalid page/size");
+		}
+		// 深分页保护：offset 过大时全表扫描代价高，超过阈值直接拒绝并提示改用游标。
+		if ((long) page * size >= 1000) {
+			throw new InvalidConversationRequestException("Deep pagination denied: page*size must < 1000, use cursor");
+		}
+		long total = conversationMapper.countByUserId(userId);
+		int totalPages = (int) Math.ceil((double) total / size);
+		int offset = page * size;
+		java.util.List<ConversationEntity> entities = conversationMapper.listByUserId(userId, offset, size);
+		java.util.List<ConversationView> items = entities.stream()
+				.map(e -> new ConversationView(e.getId(), e.getTitle(), e.getCreatedAt(), e.getUpdatedAt()))
+				.toList();
+		return new ConversationPage(items, page, size, total, totalPages);
 	}
 
-	// -------------------------------------------------------------------------
-	// 内部视图：与 HTTP DTO 解耦，Controller 负责 statusCode 与字符串化
-	// -------------------------------------------------------------------------
+	/**
+	 * 重命名会话并刷新 updatedAt。
+	 */
+	@Transactional
+	public ConversationView rename(Long userId, Long conversationId, String title) {
+		if (userId == null || conversationId == null) {
+			throw new InvalidConversationRequestException("userId and conversationId must not be null");
+		}
+		ConversationEntity entity = conversationMapper.findByIdAndUserId(conversationId, userId);
+		if (entity == null) {
+			throw new ConversationNotFoundException();
+		}
+		String normalized = normalizeTitle(title);
+		entity.setTitle(normalized);
+		entity.setUpdatedAt(LocalDateTime.now(clock));
+		int rows = conversationMapper.updateById(entity);
+		if (rows != 1) {
+			throw new IllegalStateException("Failed to update conversation");
+		}
+		return new ConversationView(entity.getId(), entity.getTitle(), entity.getCreatedAt(), entity.getUpdatedAt());
+	}
 
 	/**
-	 * 会话在业务层的只读视图。
+	 * 删除本人会话：消息分批软删（每批一个独立事务）+ 会话软删（单独小事务）。
 	 *
-	 * @param id        主键
-	 * @param title     标题
-	 * @param createdAt 创建时间（UTC 语义由序列化统一）
-	 * @param updatedAt 更新时间
+	 * <p>
+	 * 不能用一个 @Transactional 包住整个循环——那样批处理只是"把大事务切成多条语句"，
+	 * 锁仍然持有到整体提交，违背了消除 CASCADE 大事务的初衷。批次独立提交带来的中间状态
+	 * （部分消息已删、会话仍在）是可接受的：消息只通过会话可见，且操作可重试幂等。
+	 * 会话软删放在最后：若中途崩溃，会话仍有效，用户重试删除即可收敛。
+	 * 外键保持 RESTRICT，行均保留，无孤儿数据。
+	 * </p>
 	 */
+	public void delete(Long userId, Long conversationId) {
+		if (userId == null || conversationId == null) {
+			throw new InvalidConversationRequestException("userId and conversationId must not be null");
+		}
+		// 所有权校验：非本人或已删除的会话统一 404。
+		ConversationEntity entity = conversationMapper.findByIdAndUserId(conversationId, userId);
+		if (entity == null) {
+			throw new ConversationNotFoundException();
+		}
+		LocalDateTime now = LocalDateTime.now(clock);
+
+		// 1) 消息分批软删，每批一个独立事务，锁持有时间与批大小成正比。
+		while (true) {
+			Integer affected = transactionTemplate
+					.execute(status -> messageMapper.softDeleteBatch(conversationId, now, MESSAGE_DELETE_BATCH));
+			if (affected == null || affected < MESSAGE_DELETE_BATCH) {
+				break;
+			}
+		}
+
+		// 2) 会话软删：单行 UPDATE 的小事务；行保留以满足 messages 外键。
+		int deleted = conversationMapper.softDeleteById(conversationId, now);
+		if (deleted != 1) {
+			// 影响行数为 0：并发下另一请求已抢先软删（或行已不存在），按资源不存在处理。
+			throw new ConversationNotFoundException();
+		}
+	}
+
 	public record ConversationView(
 			Long id,
 			String title,
@@ -133,7 +182,6 @@ public class ConversationService {
 			LocalDateTime updatedAt) {
 	}
 
-	/** 列表分页内部结果（里程碑 4）。 */
 	public record ConversationPage(
 			java.util.List<ConversationView> items,
 			int page,
@@ -143,11 +191,7 @@ public class ConversationService {
 	}
 
 	/**
-	 * 将实体时间格式化为契约要求的 ISO-8601 UTC 字符串。
-	 *
-	 * <p>
-	 * 骨架阶段提供工具方法，实现 create/get 时复用，避免 Controller 各自格式化。
-	 * </p>
+	 * 统一 UTC 时间序列化格式，供 API 响应复用。
 	 */
 	static String formatUtc(LocalDateTime dateTime) {
 		if (dateTime == null) {
@@ -157,9 +201,7 @@ public class ConversationService {
 	}
 
 	/**
-	 * 标题规范化骨架：实现 create/rename 时调用。
-	 *
-	 * @throws IllegalArgumentException 标题非法时，由异常处理器映射为 INVALID_CONVERSATION_REQUEST
+	 * 规范化会话标题：空值回退默认标题，非空值做 trim + 长度校验。
 	 */
 	static String normalizeTitle(String title) {
 		if (title == null || title.isBlank()) {
@@ -168,28 +210,20 @@ public class ConversationService {
 		String strippedTitle = title.strip();
 		int len = strippedTitle.codePointCount(0, strippedTitle.length());
 		if (len < MIN_TITLE_LENGTH || len > MAX_TITLE_LENGTH) {
-			throw new IllegalArgumentException("Title length must be between 1 and 100 characters");
+			throw new InvalidConversationRequestException("Title length must be between 1 and 100 characters");
 		}
 		return strippedTitle;
 	}
 
-	/** 供测试或后续实现读取当前时钟。 */
-	LocalDateTime now() {
-		return LocalDateTime.now(clock);
-	}
-
-	/** 组装 HTTP 成功响应（Controller 使用）。 */
+	/**
+	 * 领域视图到接口响应的映射。
+	 */
 	static ConversationResponse toResponse(int statusCode, ConversationView view) {
 		return new ConversationResponse(
 				statusCode,
-				String.valueOf(view.id()),
+				view.id().toString(),
 				view.title(),
 				formatUtc(view.createdAt()),
 				formatUtc(view.updatedAt()));
-	}
-
-	/** 供异常处理器等引用默认标题常量时保持包内一致。 */
-	static HttpStatus createdStatus() {
-		return HttpStatus.CREATED;
 	}
 }

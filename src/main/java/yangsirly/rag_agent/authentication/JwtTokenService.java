@@ -26,4 +26,16 @@ public interface JwtTokenService {
 	 * @return 解析后的已认证用户
 	 */
 	AuthenticatedUser parseAccessToken(String token);
+
+	/**
+	 * 提取 token 的 jti（JWT ID）。token 无效或缺失 jti 时返回 null，
+	 * 不抛异常——调用方（黑名单检查）把 null 视为"无需查询"。
+	 */
+	String extractJti(String token);
+
+	/**
+	 * 提取 token 的过期时间。token 无效时返回 null。
+	 * logout 计算黑名单 TTL 用：TTL 与剩余有效期对齐。
+	 */
+	java.util.Date extractExpiration(String token);
 }

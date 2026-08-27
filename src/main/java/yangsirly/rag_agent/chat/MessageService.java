@@ -1,6 +1,7 @@
 package yangsirly.rag_agent.chat;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -8,17 +9,25 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import yangsirly.rag_agent.common.exception.InvalidMessageRequestException;
+import yangsirly.rag_agent.common.exception.RateLimitExceededException;
+import yangsirly.rag_agent.common.ratelimit.RateLimitProperties;
+import yangsirly.rag_agent.common.ratelimit.RateLimiter;
 
 /**
- * 消息发送与历史查询的业务边界——里程碑 3 的核心闭环。
+ * 消息发送与历史查询的业务边界。
  *
  * <p>
- * <b>技术决策（方案 A）</b>：一次发送在同一事务内完成
- * 「校验 → 写 USER → 写 ASSISTANT → 更新会话 updatedAt」。
+ * <b>技术决策（方案 A）</b>：一次发送的"写路径"在一个事务内完成
+ * 「写 USER → 写 ASSISTANT → 更新会话 updatedAt」。
  * 模板回复没有外部 IO，单事务可保证两条消息一致；
  * 接入真实模型后必须改为异步状态或拆分事务（学习笔记将展开）。
  * </p>
@@ -27,7 +36,19 @@ import org.springframework.transaction.annotation.Transactional;
  * <b>幂等不变量</b>：同一会话内一个 {@code clientMessageId}
  * 最多对应一条 USER 消息和一条 ASSISTANT 回复。
  * 最终保证是数据库唯一约束 {@code uk_messages_conversation_client_message}，
- * 不能只靠“先查后写”。
+ * 不能只靠"先查后写"；Redis SET NX 只是减少重复打 DB 的快路径。
+ * </p>
+ *
+ * <p>
+ * <b>工业级事务边界</b>：{@link #send} 本身不加 @Transactional。
+ * 校验、限流、Redis 快路径、幂等预查都在事务外（每条语句独立快照，
+ * 能看到并发已提交的行）；只有三条写入用 {@link TransactionTemplate}
+ * 包成一个事务。这样修复了两个问题：
+ * 1) MySQL REPEATABLE READ 下，事务内捕获 DuplicateKeyException 后重查
+ * 仍读旧快照，看不到并发已提交的 USER 消息，导致 500；
+ * 2) 限流与 Redis 调用不再占用 Hikari 连接（@Transactional 在第一条 SQL
+ * 前就会向连接池借连接）。
+ * 学习笔记：docs/learning/milestone-06-industrial-hardening.md#3.2
  * </p>
  */
 @Service
@@ -40,84 +61,119 @@ public class MessageService {
 	private static final int MAX_CONTENT_LENGTH = 10_000;
 	private static final int MIN_PAGE_SIZE = 1;
 	private static final int MAX_PAGE_SIZE = 100;
+	/** 深分页保护阈值：page*size 达到该值即拒绝，引导客户端改用游标。 */
+	private static final int MAX_PAGE_OFFSET = 1000;
 	private static final String CLIENT_MESSAGE_UNIQUE = "uk_messages_conversation_client_message";
 
 	private final ConversationMapper conversationMapper;
 	private final MessageMapper messageMapper;
 	private final Clock clock;
+	private final RateLimiter rateLimiter;
+	private final RateLimitProperties rateLimitProperties;
+	private final StringRedisTemplate stringRedisTemplate;
+	private final TransactionTemplate transactionTemplate;
 
 	public MessageService(
 			ConversationMapper conversationMapper,
 			MessageMapper messageMapper,
-			Clock clock) {
+			Clock clock,
+			RateLimiter rateLimiter,
+			RateLimitProperties rateLimitProperties,
+			@Autowired(required = false) StringRedisTemplate stringRedisTemplate,
+			TransactionTemplate transactionTemplate) {
 		this.conversationMapper = conversationMapper;
 		this.messageMapper = messageMapper;
 		this.clock = clock;
+		this.rateLimiter = rateLimiter;
+		this.rateLimitProperties = rateLimitProperties;
+		this.stringRedisTemplate = stringRedisTemplate;
+		this.transactionTemplate = transactionTemplate;
 	}
 
 	/**
-	 * 发送消息并生成模板回复（单事务）。
+	 * 发送消息并生成模板回复。
 	 *
 	 * <p>
-	 * 目标流程（实现时严格按序）：
-	 * <ol>
-	 * <li>校验 conversationId / clientMessageId / content；</li>
-	 * <li>{@code findByIdAndUserId} 确认会话归属，失败 →
-	 * {@link ConversationNotFoundException}；</li>
-	 * <li>按 clientMessageId 查是否已有 USER 消息：
-	 * <ul>
-	 * <li>存在且 content 相同 → 加载配对 ASSISTANT，返回 {@code created=false}（HTTP 200）；</li>
-	 * <li>存在且 content 不同 → {@link IdempotencyConflictException}；</li>
-	 * </ul>
-	 * </li>
-	 * <li>插入 USER 消息；若并发撞唯一约束，捕获 {@link DuplicateKeyException} 后走“重试命中”路径；</li>
-	 * <li>插入指向该 USER 的 ASSISTANT 模板消息；</li>
-	 * <li>更新会话 {@code updatedAt}；</li>
-	 * <li>返回 {@code created=true}（HTTP 201）及两条消息视图。</li>
-	 * </ol>
+	 * 读操作（归属校验、幂等预查、Redis 快路径）在事务外执行；
+	 * 写操作（两条消息 + 会话 updatedAt）在单个编程式事务内执行；
+	 * 撞唯一约束时在事务回滚后用新快照重查，走"重试命中"路径。
 	 * </p>
-	 *
-	 * @param command 发送命令（userId 必须来自认证主体）
-	 * @return 消息对 + 是否首次创建
 	 */
-	@Transactional
 	public SendResult send(SendMessageCommand command) {
 		// --- 1. 入参与字段形态 ---
 		if (command == null) {
-			throw new IllegalArgumentException("command must not be null");
+			throw new InvalidMessageRequestException("command must not be null");
 		}
 		Long userId = command.userId();
 		Long conversationId = command.conversationId();
 		String clientMessageId = command.clientMessageId();
 		String content = command.content();
 		if (userId == null || conversationId == null) {
-			throw new IllegalArgumentException("userId and conversationId must not be null");
+			throw new InvalidMessageRequestException("userId and conversationId must not be null");
 		}
 		validateClientMessageId(clientMessageId);
 		validateContent(content);
 
-		// --- 2. 会话所有权 ---
+		// --- 2. 发送限流（user 维度，20/min 默认）。在事务外执行，不占用 DB 连接。 ---
+		if (rateLimiter != null && rateLimitProperties != null) {
+			String key = "send:user:" + userId;
+			int limit = rateLimitProperties.sendPerUserPerMinute();
+			if (!rateLimiter.tryAcquire(key, limit, Duration.ofMinutes(1))) {
+				throw new RateLimitExceededException("Too many send requests", 60, limit);
+			}
+		}
+
+		// --- 3. 会话所有权（独立快照，已删除或非本人 → 404） ---
 		ConversationEntity conversation = conversationMapper.findByIdAndUserId(conversationId, userId);
 		if (conversation == null) {
 			throw new ConversationNotFoundException();
 		}
 
-		// --- 3. 幂等预查（快速路径；并发下仍可能双双未命中，靠唯一约束兜底）---
+		// --- 4. Redis 快路径：SET NX 标记 30s。
+		// 命中（返回 false）说明 30s 内出现过相同幂等键，转 DB 查证；
+		// 未命中则继续走 DB 预查。Redis 异常时静默降级——DB 唯一约束才是最终仲裁。 ---
+		if (stringRedisTemplate != null) {
+			String redisKey = "idmp:conv:" + conversationId + ":client:" + clientMessageId;
+			try {
+				Boolean ok = stringRedisTemplate.opsForValue().setIfAbsent(redisKey, "1", Duration.ofSeconds(30));
+				if (Boolean.FALSE.equals(ok)) {
+					MessageEntity existing = messageMapper.findUserMessageByClientMessageId(conversationId,
+							clientMessageId);
+					if (existing != null) {
+						return resolveExistingPair(existing, content);
+					}
+				}
+			} catch (Exception ignored) {
+				// Redis 不可用不影响正确性，只损失快路径。
+			}
+		}
+
+		// --- 5. 幂等预查（快速路径；并发下仍可能双双未命中，靠唯一约束兜底） ---
 		MessageEntity existingUser = messageMapper.findUserMessageByClientMessageId(conversationId, clientMessageId);
 		if (existingUser != null) {
 			return resolveExistingPair(existingUser, content);
 		}
 
-		// --- 4. 首次写入 USER ---
+		// --- 6. 写路径：单事务写入 USER + ASSISTANT + 会话 updatedAt ---
 		LocalDateTime now = LocalDateTime.now(clock);
 		MessageEntity userEntity = MessageEntity.userMessage(conversationId, clientMessageId, content);
 		userEntity.setCreatedAt(now);
+		MessageEntity assistant;
 		try {
-			messageMapper.insert(userEntity);
-		}
-		catch (DuplicateKeyException ex) {
+			assistant = transactionTemplate.execute(status -> {
+				messageMapper.insert(userEntity);
+				MessageEntity assistantEntity = MessageEntity.assistantReply(
+						conversationId, userEntity.getId(), TEMPLATE_REPLY);
+				assistantEntity.setCreatedAt(now);
+				messageMapper.insert(assistantEntity);
+				conversation.setUpdatedAt(now);
+				conversationMapper.updateById(conversation);
+				return assistantEntity;
+			});
+		} catch (DuplicateKeyException ex) {
 			if (isClientMessageConflict(ex)) {
-				// 并发下另一事务已提交：再查并走 resolveExistingPair
+				// 事务已回滚，这里用新连接/新快照重查，
+				// 才能看到并发胜者已提交的 USER 消息（RR 隔离级别下的关键点）。
 				MessageEntity raced = messageMapper.findUserMessageByClientMessageId(conversationId, clientMessageId);
 				if (raced == null) {
 					throw new IllegalStateException(
@@ -128,18 +184,8 @@ public class MessageService {
 			throw ex;
 		}
 
-		// --- 5. 写入 ASSISTANT 模板回复 ---
-		MessageEntity assistantEntity = MessageEntity.assistantReply(
-				conversationId, userEntity.getId(), TEMPLATE_REPLY);
-		assistantEntity.setCreatedAt(now);
-		messageMapper.insert(assistantEntity);
-
-		// --- 6. 刷新会话活跃时间 ---
-		conversation.setUpdatedAt(now);
-		conversationMapper.updateById(conversation);
-
-		// --- 7. 组装首次创建结果 ---
-		return new SendResult(true, toView(userEntity), toView(assistantEntity));
+		// --- 7. 组装首次创建结果（事务正常提交） ---
+		return new SendResult(true, toView(userEntity), toView(assistant));
 	}
 
 	/**
@@ -147,46 +193,45 @@ public class MessageService {
 	 *
 	 * <p>
 	 * 分页语义：page=0 最新一页；页内 items 按 createdAt ASC, id ASC。
-	 * 默认 size=50，最大 100（与契约一致）。
+	 * 默认 size=50，最大 100；page*size >= 1000 拒绝深分页。
+	 * 传 cursor（消息 id）时改为游标分页，返回该消息之后的 size 条（时间正序）。
 	 * </p>
 	 */
 	@Transactional(readOnly = true)
-	public MessagePage listMessages(Long userId, Long conversationId, int page, int size) {
-		// 校验 page >= 0；size 在 [1, 100]；非法 → IllegalArgumentException → INVALID_MESSAGE_REQUEST
+	public MessagePage listMessages(Long userId, Long conversationId, int page, int size, Long cursor) {
 		if (userId == null || conversationId == null) {
-			throw new IllegalArgumentException("userId and conversationId must not be null");
+			throw new InvalidMessageRequestException("userId and conversationId must not be null");
 		}
 		if (page < 0) {
-			throw new IllegalArgumentException("page must be >= 0");
+			throw new InvalidMessageRequestException("page must be >= 0");
 		}
 		if (size < MIN_PAGE_SIZE || size > MAX_PAGE_SIZE) {
-			throw new IllegalArgumentException(
-					"size must be between " + MIN_PAGE_SIZE + " and " + MAX_PAGE_SIZE);
+			throw new InvalidMessageRequestException("size must be between " + MIN_PAGE_SIZE + " and " + MAX_PAGE_SIZE);
 		}
-
-		// 所有权：findByIdAndUserId；null → ConversationNotFoundException
+		if (cursor == null && (long) page * size >= MAX_PAGE_OFFSET) {
+			throw new InvalidMessageRequestException(
+					"Deep pagination denied: page*size must < " + MAX_PAGE_OFFSET + ", use cursor");
+		}
 		ConversationEntity conversation = conversationMapper.findByIdAndUserId(conversationId, userId);
 		if (conversation == null) {
 			throw new ConversationNotFoundException();
 		}
-
-		// total = countByConversationId
 		long totalElements = messageMapper.countByConversationId(conversationId);
-
-		// 查询“最新页优先”的一页，再在内存中保证页内正序（createdAt ASC, id ASC）
-		List<MessageEntity> newestFirst = messageMapper.pageNewestFirst(conversationId, page, size);
-		List<MessageEntity> pageItems = new ArrayList<>(newestFirst);
-		Collections.reverse(pageItems);
-
-		// 映射 MessageView 列表，计算 totalPages
+		List<MessageEntity> pageItems;
+		if (cursor != null) {
+			// 游标分页：返回 cursor 消息之后（更晚）的 size 条，时间正序。
+			pageItems = messageMapper.pageAfterCursor(conversationId, cursor, size);
+		} else {
+			// 最新页优先：SQL 取第 page 页（时间倒序），内存反转为页内正序。
+			List<MessageEntity> newestFirst = messageMapper.pageNewestFirst(conversationId, page, size);
+			List<MessageEntity> tmp = new ArrayList<>(newestFirst);
+			Collections.reverse(tmp);
+			pageItems = tmp;
+		}
 		List<MessageView> items = pageItems.stream().map(MessageService::toView).toList();
 		int totalPages = totalElements == 0 ? 0 : (int) ((totalElements + size - 1) / size);
 		return new MessagePage(items, page, size, totalElements, totalPages);
 	}
-
-	// -------------------------------------------------------------------------
-	// 实现时拆出的辅助步骤（骨架预留，避免 send 方法膨胀）
-	// -------------------------------------------------------------------------
 
 	/**
 	 * 幂等命中：已有 USER 消息时校验 content 并加载 ASSISTANT。
@@ -206,13 +251,14 @@ public class MessageService {
 		return new SendResult(false, toView(existingUser), toView(assistant));
 	}
 
-	/** 判断唯一约束冲突是否来自 client_message_id。 */
+	/**
+	 * 判断 DuplicateKeyException 是否由幂等唯一约束触发。
+	 * MySQL/H2 的异常消息里会带上约束名，沿 cause 链逐层查找。
+	 */
 	private boolean isClientMessageConflict(DuplicateKeyException exception) {
-		// 沿异常链查找约束名 CLIENT_MESSAGE_UNIQUE（与注册模块 containsConstraintName 同模式）
 		String normalizedConstraintName = CLIENT_MESSAGE_UNIQUE.toLowerCase(Locale.ROOT);
 		Throwable current = exception;
 		while (current != null) {
-			// MySQL 和 H2 驱动都会在异常链中包含违反的约束名。
 			String message = current.getMessage();
 			if (message != null && message.toLowerCase(Locale.ROOT).contains(normalizedConstraintName)) {
 				return true;
@@ -222,41 +268,43 @@ public class MessageService {
 		return false;
 	}
 
-	/** 校验 clientMessageId 为标准 UUID。 */
+	/**
+	 * 校验幂等键格式：必须是非空 UUID 字符串。
+	 */
 	static void validateClientMessageId(String clientMessageId) {
 		if (clientMessageId == null || clientMessageId.isBlank()) {
-			throw new IllegalArgumentException("clientMessageId must not be null or blank");
+			throw new InvalidMessageRequestException("clientMessageId must not be null or blank");
 		}
 		try {
 			UUID.fromString(clientMessageId);
-		}
-		catch (IllegalArgumentException ex) {
-			throw new IllegalArgumentException("clientMessageId must be a valid UUID string", ex);
+		} catch (IllegalArgumentException ex) {
+			throw new InvalidMessageRequestException("clientMessageId must be a valid UUID string", ex);
 		}
 	}
 
 	/**
-	 * 校验消息正文长度。
-	 *
-	 * <p>
-	 * 纯空白用 strip 后是否为空判断；持久化仍保存用户原始 content（含首尾空白）。
-	 * </p>
+	 * 校验消息文本内容（去空白后非空，长度 1~10000 code points）。
 	 */
 	static void validateContent(String content) {
 		if (content == null || content.strip().isEmpty()) {
-			throw new IllegalArgumentException("Content must not be null or blank");
+			throw new InvalidMessageRequestException("Content must not be null or blank");
 		}
 		int length = content.codePointCount(0, content.length());
 		if (length < MIN_CONTENT_LENGTH || length > MAX_CONTENT_LENGTH) {
-			throw new IllegalArgumentException("Content length must be between " + MIN_CONTENT_LENGTH + " and "
-					+ MAX_CONTENT_LENGTH + " code points");
+			throw new InvalidMessageRequestException(
+					"Content length must be between " + MIN_CONTENT_LENGTH + " and " + MAX_CONTENT_LENGTH
+							+ " code points");
 		}
 	}
 
-	/** 实体 → API 视图；id 字段在 Controller/此处统一 String 化。 */
+	/**
+	 * 将持久化实体映射为对外响应视图。
+	 *
+	 * <p>
+	 * 这里会按角色约束字段：USER 必须有 clientMessageId，ASSISTANT 必须有 replyToMessageId。
+	 * </p>
+	 */
 	static MessageView toView(MessageEntity entity) {
-		// role.name()；时间用 ConversationService.formatUtc
-		// USER 填 clientMessageId；ASSISTANT 填 replyToMessageId 字符串
 		if (entity == null) {
 			throw new IllegalArgumentException("entity must not be null");
 		}
@@ -264,7 +312,6 @@ public class MessageService {
 		if (role == null) {
 			throw new IllegalArgumentException("message role must not be null");
 		}
-
 		String clientMessageId = null;
 		String replyToMessageId = null;
 		switch (role) {
@@ -277,7 +324,6 @@ public class MessageService {
 				replyToMessageId = replyTo.toString();
 			}
 		}
-
 		return new MessageView(
 				entity.getId().toString(),
 				entity.getConversationId().toString(),
@@ -288,23 +334,20 @@ public class MessageService {
 				ConversationService.formatUtc(entity.getCreatedAt()));
 	}
 
-	/**
-	 * 发送结果。
-	 *
-	 * @param created          true=首次写入（HTTP 201），false=幂等重试（HTTP 200）
-	 * @param userMessage      用户消息视图
-	 * @param assistantMessage 模板回复视图
-	 */
 	public record SendResult(
 			boolean created,
 			MessageView userMessage,
 			MessageView assistantMessage) {
-
-		/** 按是否首次创建选择 HTTP 状态。 */
+		/**
+		 * 首次创建返回 201，幂等命中返回 200。
+		 */
 		public HttpStatus httpStatus() {
 			return created ? HttpStatus.CREATED : HttpStatus.OK;
 		}
 
+		/**
+		 * 转换为接口层响应 DTO。
+		 */
 		public SendMessageResponse toResponse() {
 			return new SendMessageResponse(
 					httpStatus().value(),
@@ -313,16 +356,15 @@ public class MessageService {
 		}
 	}
 
-	/**
-	 * 消息历史分页内部结果。
-	 */
 	public record MessagePage(
-			java.util.List<MessageView> items,
+			List<MessageView> items,
 			int page,
 			int size,
 			long totalElements,
 			int totalPages) {
-
+		/**
+		 * 转换为分页响应 DTO。
+		 */
 		public MessageListResponse toResponse() {
 			return new MessageListResponse(
 					HttpStatus.OK.value(),
@@ -331,27 +373,6 @@ public class MessageService {
 					size,
 					totalElements,
 					totalPages);
-		}
-	}
-
-	/** 供后续实现与测试读取时钟。 */
-	LocalDateTime now() {
-		return LocalDateTime.now(clock);
-	}
-
-	/** 暴露模板常量，便于测试断言文案。 */
-	public static String templateReply() {
-		return TEMPLATE_REPLY;
-	}
-
-	/** 骨架阶段保留 UUID 解析提示，避免实现时忘记标准格式。 */
-	@SuppressWarnings("unused")
-	private static UUID parseUuidOrNull(String value) {
-		try {
-			return UUID.fromString(value);
-		}
-		catch (IllegalArgumentException ex) {
-			return null;
 		}
 	}
 }

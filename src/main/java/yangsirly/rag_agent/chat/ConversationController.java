@@ -13,126 +13,112 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import yangsirly.rag_agent.authentication.AuthenticatedUser;
+import yangsirly.rag_agent.chat.ConversationListResponse.ConversationViewDto;
 
 /**
- * 会话相关 HTTP 入口。
- *
- * <p>
- * 身份一律从 {@link Authentication} 的 principal 读取，
- * 禁止信任请求体或路径中的“用户 id”声明。
- * </p>
- *
- * <p>
- * 路径 id 解析：格式非法时抛出 {@link IllegalArgumentException}，
- * 由 {@link ChatExceptionHandler} 映射为 {@code INVALID_PATH_PARAMETER}。
- * </p>
+ * 会话相关 HTTP 接口：创建、读取、列表、重命名、删除。
  */
 @RestController
 public class ConversationController {
 
-	private final ConversationService conversationService;
+    private final ConversationService conversationService;
 
-	public ConversationController(ConversationService conversationService) {
-		this.conversationService = conversationService;
-	}
+    public ConversationController(ConversationService conversationService) {
+        this.conversationService = conversationService;
+    }
 
-	/**
-	 * POST /conversations — 创建会话。
-	 *
-	 * <p>
-	 * title 可选；校验失败由 Service 抛 IllegalArgumentException → 400。
-	 * </p>
-	 */
-	@PostMapping("/conversations")
-	public ResponseEntity<ConversationResponse> create(
-			@RequestBody(required = false) CreateConversationRequest request,
-			Authentication authentication) {
-		AuthenticatedUser user = requireUser(authentication);
-		String title = request == null ? null : request.title();
-		ConversationService.ConversationView view =
-				conversationService.create(new CreateConversationCommand(user.userId(), title));
-		return ResponseEntity.status(HttpStatus.CREATED).body(ConversationService.toResponse(201, view));
-	}
+    /** 创建会话；未传标题时由服务层回退默认标题。 */
+    @PostMapping("/conversations")
+    public ResponseEntity<ConversationResponse> create(
+            @RequestBody(required = false) CreateConversationRequest request,
+            Authentication authentication) {
+        AuthenticatedUser user = requireUser(authentication);
+        String title = request == null ? null : request.title();
+        ConversationService.ConversationView view = conversationService
+                .create(new CreateConversationCommand(user.userId(), title));
+        return ResponseEntity.status(HttpStatus.CREATED).body(ConversationService.toResponse(201, view));
+    }
 
-	/**
-	 * GET /conversations/{conversationId} — 会话详情。
-	 */
-	@GetMapping("/conversations/{conversationId}")
-	public ResponseEntity<ConversationResponse> get(
-			@PathVariable String conversationId,
-			Authentication authentication) {
-		AuthenticatedUser user = requireUser(authentication);
-		Long id = parseId(conversationId);
-		ConversationService.ConversationView view = conversationService.getOwned(user.userId(), id);
-		return ResponseEntity.ok(ConversationService.toResponse(200, view));
-	}
+    /** 读取当前用户拥有的单个会话。 */
+    @GetMapping("/conversations/{conversationId}")
+    public ResponseEntity<ConversationResponse> get(
+            @PathVariable String conversationId,
+            Authentication authentication) {
+        AuthenticatedUser user = requireUser(authentication);
+        Long id = parseId(conversationId);
+        ConversationService.ConversationView view = conversationService.getOwned(user.userId(), id);
+        return ResponseEntity.ok(ConversationService.toResponse(200, view));
+    }
 
-	/**
-	 * GET /conversations — 会话列表（里程碑 4 完整实现）。
-	 */
-	@GetMapping("/conversations")
-	public ResponseEntity<?> list(
-			@RequestParam(defaultValue = "0") int page,
-			@RequestParam(defaultValue = "20") int size,
-			Authentication authentication) {
-		AuthenticatedUser user = requireUser(authentication);
-		// TODO(里程碑 4)：conversationService.list + 列表响应 DTO
-		throw new UnsupportedOperationException("TODO: implement list conversations (milestone 4)");
-	}
+    /** 分页查询当前用户会话列表。 */
+    @GetMapping("/conversations")
+    public ResponseEntity<ConversationListResponse> list(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            Authentication authentication) {
+        AuthenticatedUser user = requireUser(authentication);
+        ConversationService.ConversationPage p = conversationService.list(user.userId(), page, size);
+        var items = p.items().stream().map(v -> new ConversationViewDto(
+                v.id().toString(),
+                v.title(),
+                ConversationService.formatUtc(v.createdAt()),
+                ConversationService.formatUtc(v.updatedAt()))).toList();
+        ConversationListResponse resp = new ConversationListResponse(200, items, p.page(), p.size(), p.totalElements(),
+                p.totalPages());
+        return ResponseEntity.ok(resp);
+    }
 
-	/**
-	 * PATCH /conversations/{conversationId} — 修改标题（里程碑 4）。
-	 */
-	@PatchMapping("/conversations/{conversationId}")
-	public ResponseEntity<ConversationResponse> rename(
-			@PathVariable String conversationId,
-			@RequestBody RenameConversationRequest request,
-			Authentication authentication) {
-		AuthenticatedUser user = requireUser(authentication);
-		Long id = parseId(conversationId);
-		// TODO(里程碑 4)：conversationService.rename(...)
-		throw new UnsupportedOperationException("TODO: implement rename conversation (milestone 4)");
-	}
+    /** 重命名会话。 */
+    @PatchMapping("/conversations/{conversationId}")
+    public ResponseEntity<ConversationResponse> rename(
+            @PathVariable String conversationId,
+            @RequestBody RenameConversationRequest request,
+            Authentication authentication) {
+        AuthenticatedUser user = requireUser(authentication);
+        Long id = parseId(conversationId);
+        ConversationService.ConversationView view = conversationService.rename(user.userId(), id,
+                request == null ? null : request.title());
+        return ResponseEntity.ok(ConversationService.toResponse(200, view));
+    }
 
-	/**
-	 * DELETE /conversations/{conversationId} — 物理删除（里程碑 4）。
-	 */
-	@DeleteMapping("/conversations/{conversationId}")
-	public ResponseEntity<Void> delete(
-			@PathVariable String conversationId,
-			Authentication authentication) {
-		AuthenticatedUser user = requireUser(authentication);
-		Long id = parseId(conversationId);
-		// TODO(里程碑 4)：conversationService.delete(...); return 204
-		throw new UnsupportedOperationException("TODO: implement delete conversation (milestone 4)");
-	}
+    /** 删除会话（服务层执行分批软删 + 会话软删）。 */
+    @DeleteMapping("/conversations/{conversationId}")
+    public ResponseEntity<Void> delete(
+            @PathVariable String conversationId,
+            Authentication authentication) {
+        AuthenticatedUser user = requireUser(authentication);
+        Long id = parseId(conversationId);
+        conversationService.delete(user.userId(), id);
+        return ResponseEntity.noContent().build();
+    }
 
-	/** 从 SecurityContext 取出已认证用户；过滤器保证类型，这里再断言一次。 */
-	private static AuthenticatedUser requireUser(Authentication authentication) {
-		if (authentication == null || !(authentication.getPrincipal() instanceof AuthenticatedUser user)) {
-			// 正常情况下过滤器链会先返回 401；此处防御编程，避免 NPE
-			throw new IllegalStateException("Authenticated user principal is required");
-		}
-		return user;
-	}
+    /** 提取并校验认证主体。 */
+    private static AuthenticatedUser requireUser(Authentication authentication) {
+        if (authentication == null || !(authentication.getPrincipal() instanceof AuthenticatedUser user)) {
+            throw new IllegalStateException("Authenticated user principal is required");
+        }
+        return user;
+    }
 
-	/**
-	 * 路径 id → long。非法格式返回 400 INVALID_PATH_PARAMETER（见异常处理器）。
-	 */
-	static Long parseId(String raw) {
-		if (raw == null || raw.isBlank()) {
-			throw new IllegalArgumentException("Invalid path parameter");
-		}
-		try {
-			return Long.parseLong(raw);
-		} catch (NumberFormatException ex) {
-			throw new IllegalArgumentException("Invalid path parameter", ex);
-		}
-	}
+    /**
+     * 解析路径 id。
+     *
+     * <p>
+     * 统一抛 IllegalArgumentException，交由异常处理器映射为 400。
+     * </p>
+     */
+    static Long parseId(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalArgumentException("Invalid path parameter");
+        }
+        try {
+            return Long.parseLong(raw);
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("Invalid path parameter", ex);
+        }
+    }
 
-	/**
-	 * 修改标题请求体（里程碑 4 使用；骨架先定义以免 Controller 引用缺失）。
-	 */
-	public record RenameConversationRequest(String title) {
-	}
+    /** PATCH 请求体。 */
+    public record RenameConversationRequest(String title) {
+    }
 }

@@ -193,6 +193,34 @@ PATCH 请求统一遵循以下语义：
 
 ---
 
+
+## 2.7 工业级增补（2026-08 高并发重构）
+
+### 2.7.1 限流与 429
+
+| HTTP | code | 场景 | 头 |
+| --- | --- | --- | --- |
+| 429 | RATE_LIMITED | 触发限流（注册/登录 IP 10/min，发送消息 user 20/min，登录连续失败 5 次锁定 15 分钟） | Retry-After: 秒, X-RateLimit-Limit |
+
+- 限流粒度：POST /register 按 IP；POST /login 按 IP（账号级防刷由 AuthService 连续失败锁定处理，不在 Filter 层读 JSON body）；POST /conversations/{id}/messages 按 userId。
+- 超限响应体仍为统一错误体，code=RATE_LIMITED，前端应按 Retry-After 退避重试，避免立即重试。
+
+### 2.7.2 幂等扩展
+
+- 发送消息支持 Header Idempotency-Key: <UUID>，与 body 的 clientMessageId 等价；同时存在时以 Header 为准，不一致返回 400 INVALID_MESSAGE_REQUEST。
+- 幂等语义不变：同 conversation_id + clientMessageId 仅一对消息，DB 唯一约束为最终仲裁，Redis SET NX 仅快路径。
+
+### 2.7.3 分页与游标
+
+- 保留 page/size offset 分页，但增加深分页保护：page*size >= 1000 时返回 400 INVALID_MESSAGE_REQUEST 或 INVALID_CONVERSATION_REQUEST。
+- 新增可选 cursor（消息 id 字符串）游标分页：GET /conversations/{id}/messages?cursor=<id>&size=50 返回 cursor 之后（更晚）的消息，页内时间正序；未传 cursor 时行为与原来一致（page=0 返回最新一页，页内正序）。
+- 旧前端不传 cursor 完全兼容。响应体字段与 offset 分页一致，不额外返回 cursor 游标（客户端取当前页最后一条的 id 作为下次 cursor）。
+
+### 2.7.4 软删除可见性
+
+- 删除会话后（会话与消息均软删除，行保留以维持外键），GET /conversations/{id}/messages 对已删会话返回 404；GET /conversations/{id} 同样 404；再次 DELETE 同一会话也返回 404。
+- 消息/会话软删除字段 deleted_at 不暴露给前端。
+
 ## 3. 注册
 
 ### 3.1 注册

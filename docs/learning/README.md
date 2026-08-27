@@ -14,7 +14,8 @@
 | --- | --- | --- |
 | [里程碑 01：用户注册](./milestone-01-registration.md) | 已实现，持续完善 | Spring MVC 请求链路、分层模型、BCrypt、MyBatis-Plus、事务、并发唯一约束、异常映射和测试 |
 | [里程碑 02：登录与认证](./milestone-02-authentication.md) | 核心路径已实现，集成测试待补 | 密码 matches、禁用检查、HMAC JWT 签发/验签、过滤器写 SecurityContext；端到端登录 HTTP 集成测试待补 |
-| [里程碑 03：聊天闭环](./milestone-03-chat-loop.md) | 骨架已落地，业务 TODO | 包结构、V2 表迁移、DTO/异常/控制器路由；单事务发送与 `clientMessageId` 幂等设计；实现体仍为 TODO（501） |
+| [里程碑 03：聊天闭环](./milestone-03-chat-loop.md) | 业务已实现，集成测试已补 | `send` 单事务消息对、`clientMessageId` 三态幂等与并发兜底、所有权 404 伪装、最新页优先分页、游标与深分页保护 |
+| [里程碑 06：工业级高并发加固](./milestone-06-industrial-hardening.md) | 已实现并审查修复 | 软删替代 CASCADE（会话+消息双侧）、Hikari/Tomcat 池化、Redis Lua 限流 + SET NX 幂等快路径、JWT jti 黑名单、登录失败锁定、游标/深分页保护、429/黑名单、Prometheus；移除永不激活的 RabbitMQ 脚手架 |
 
 ## 推荐阅读方式
 
@@ -36,7 +37,8 @@
 - JJWT 0.12.6（JWT HMAC 签发/验签）
 - Spring Boot Flyway Starter + MySQL Connector/J
 - 本机验证数据库 MySQL 8.0.40
-- 测试数据库 H2
+- 测试数据库 H2（MODE=MySQL）
+- Redis 7（限流/幂等快路径/黑名单/登录失败计数；测试排除 Redis 自动配置，降级为内存实现）
 
 版本升级后，涉及自动配置、异常类型或默认行为的结论应重新验证。
 
@@ -45,7 +47,7 @@
 后续里程碑完成时，优先继续维护本目录，而不是把长篇原理说明堆进源码：
 
 - 登录 HTTP 集成测试：注册→登录→带 Cookie 访问；错误密码/禁用用户断言
-- 聊天闭环业务实现：在 [milestone-03-chat-loop.md](./milestone-03-chat-loop.md) 骨架笔记之上，填实 `MessageService.send` / 历史分页并补集成测试后更新该文状态
+- 聊天专项测试：在 [milestone-03-chat-loop.md](./milestone-03-chat-loop.md) 第 10.2 节清单基础上补 Service 单元测试、HTTP 集成测试与并发双发测试，并实测 MySQL 上的 V2 迁移
 - 权限与角色边界
 - 知识库和文档事务
 - RAG 解析、分块、召回与引用

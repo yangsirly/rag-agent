@@ -6,6 +6,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import yangsirly.rag_agent.common.exception.RateLimitExceededException;
 import yangsirly.rag_agent.registration.ApiErrorResponse;
 
 /**
@@ -52,6 +53,23 @@ public class AuthenticationExceptionHandler {
 				"USER_DISABLED",
 				exception.getMessage());
 		return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+	}
+
+	/**
+	 * 账号被防刷锁定（连续失败达到阈值）：429 + Retry-After。
+	 *
+	 * <p>注意必须在这里显式映射，否则 RateLimitExceededException 会落进
+	 * 默认 500——它是 RuntimeException，MVC 不会自动转成 429。</p>
+	 */
+	@ExceptionHandler(RateLimitExceededException.class)
+	public ResponseEntity<ApiErrorResponse> handleRateLimited(RateLimitExceededException exception) {
+		ApiErrorResponse response = new ApiErrorResponse(
+				429,
+				"RATE_LIMITED",
+				"Too many failed login attempts, account is temporarily locked");
+		return ResponseEntity.status(429)
+				.header("Retry-After", String.valueOf(exception.getRetryAfterSeconds()))
+				.body(response);
 	}
 
 	/**

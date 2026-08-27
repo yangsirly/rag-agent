@@ -15,6 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -35,6 +36,12 @@ class AuthControllerTests {
 
 	@Autowired
 	private JdbcTemplate jdbcTemplate;
+
+	@Autowired
+	private JwtTokenService jwtTokenService;
+
+	@Autowired
+	private yangsirly.rag_agent.authentication.TokenBlacklist tokenBlacklist;
 
 	@Test
 	void rejectsStructurallyIncompleteLoginRequest() throws Exception {
@@ -167,6 +174,41 @@ class AuthControllerTests {
 		// JWT 仍有效，但库里已禁用 → Service 抛 CurrentUserUnavailableException → 401
 		jdbcTemplate.update("UPDATE users SET status = 'DISABLED' WHERE email = ?", email);
 
+		mockMvc.perform(get("/me").cookie(cookie))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+	}
+
+	@Test
+	void logoutBlacklistsTokenUntilExpiry() throws Exception {
+		String email = "logout-blacklist-" + UUID.randomUUID() + "@example.com";
+		String password = "password-ok-1";
+		registerUser(email, password);
+
+		Cookie cookie = loginAndGetAccessTokenCookie(email, password);
+
+		// logout 前携带 Cookie 可访问 /me。
+		// MockMvc 在同一线程跑，SecurityContext 会跨请求残留——
+		// 必须在每次依赖 Filter 重新解析 token 的调用前清掉，否则残留的
+		// 认证会让 Filter 跳过黑名单检查。
+		SecurityContextHolder.clearContext();
+		mockMvc.perform(get("/me").cookie(cookie))
+				.andExpect(status().isOk());
+
+		// logout：服务端把该 token 的 jti 写入黑名单（至其自然过期）。
+		mockMvc.perform(post("/logout").cookie(cookie))
+				.andExpect(status().isOk());
+
+		// 直接查黑名单 Bean，确认 jti 确实被写入（隔离 Filter 链问题）。
+		String jti = jwtTokenService.extractJti(cookie.getValue());
+		org.assertj.core.api.Assertions.assertThat(jti).isNotNull();
+		org.assertj.core.api.Assertions.assertThat(tokenBlacklist.isBlacklisted(jti))
+				.as("logout 必须把 jti 写入黑名单")
+				.isTrue();
+
+		// 清掉残留认证，强制 Filter 重新走"解析 token → 查黑名单"路径。
+		SecurityContextHolder.clearContext();
+		// 复制走的同一 Cookie 在 TTL 内必须失效 → 401。
 		mockMvc.perform(get("/me").cookie(cookie))
 				.andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.code").value("UNAUTHORIZED"));

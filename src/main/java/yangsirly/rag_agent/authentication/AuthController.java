@@ -1,7 +1,12 @@
 package yangsirly.rag_agent.authentication;
 
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+
+import java.time.Duration;
+import java.util.Date;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -14,107 +19,125 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 登录、退出与当前用户的 HTTP 入口。
- *
- * <p>凭证放在 HttpOnly Cookie 中：浏览器自动携带，前端 JS 无法读取，
- * 可降低 XSS 直接窃取 token 的风险。后端在未登录时返回 401，
- * 跳转登录页属于前端职责。</p>
+ * 认证接口入口：登录、登出、当前用户信息。
  */
 @RestController
 public class AuthController {
 
-	private final AuthService authService;
-	private final AuthProperties authProperties;
+    private final AuthService authService;
+    private final AuthProperties authProperties;
+    private final TokenBlacklist tokenBlacklist;
+    private final JwtTokenService jwtTokenService;
 
-	public AuthController(AuthService authService, AuthProperties authProperties) {
-		this.authService = authService;
-		this.authProperties = authProperties;
-	}
+    public AuthController(AuthService authService, AuthProperties authProperties, TokenBlacklist tokenBlacklist,
+            JwtTokenService jwtTokenService) {
+        this.authService = authService;
+        this.authProperties = authProperties;
+        this.tokenBlacklist = tokenBlacklist;
+        this.jwtTokenService = jwtTokenService;
+    }
 
-	/**
-	 * 处理 POST /login。
-	 *
-	 * <p>成功时写入 HttpOnly Cookie，响应体只返回 role 等非机密信息。</p>
-	 */
-	@PostMapping("/login")
-	public ResponseEntity<LoginResponse> login(
-			@Valid @RequestBody LoginRequest request,
-			HttpServletResponse response) {
-		// Web 层请求对象转换成业务命令，避免业务依赖 HTTP 输入模型。
-		LoginCommand command = new LoginCommand(request.email(), request.password());
+    /**
+     * 密码登录：校验成功后签发 JWT 并写入 HttpOnly Cookie。
+     */
+    @PostMapping("/login")
+    public ResponseEntity<LoginResponse> login(
+            @Valid @RequestBody LoginRequest request,
+            HttpServletResponse response) {
+        LoginCommand command = new LoginCommand(request.email(), request.password());
+        AuthService.LoginResult result = authService.login(command);
+        writeAccessTokenCookie(response, result.accessToken());
+        return ResponseEntity.ok(new LoginResponse(
+                HttpStatus.OK.value(),
+                result.user().role().name()));
+    }
 
-		AuthService.LoginResult result = authService.login(command);
+    /**
+     * 登出：清除 Cookie，并尽量把当前 token 的 jti 写入黑名单。
+     */
+    @PostMapping("/logout")
+    public ResponseEntity<LogoutResponse> logout(HttpServletRequest request, HttpServletResponse response) {
+        // 若携带有效 token，则把它的 jti 写入黑名单至其自然过期，
+        // 使"已复制走的 token"也随 logout 立即失效（多实例下由 Redis 共享）。
+        try {
+            String token = extractToken(request);
+            if (token != null) {
+                String jti = jwtTokenService.extractJti(token);
+                Date exp = jwtTokenService.extractExpiration(token);
+                if (jti != null && exp != null) {
+                    long ttlSec = (exp.getTime() - System.currentTimeMillis()) / 1000;
+                    if (ttlSec > 0) {
+                        tokenBlacklist.blacklist(jti, Duration.ofSeconds(ttlSec));
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // 黑名单失败不阻断 logout：Cookie 清除仍然完成。
+        }
+        clearAccessTokenCookie(response);
+        return ResponseEntity.ok(new LogoutResponse(HttpStatus.OK.value()));
+    }
 
-		// 把 Access Token 写入 HttpOnly Cookie，而不是 JSON 响应体。
-		writeAccessTokenCookie(response, result.accessToken());
+    /**
+     * 返回当前登录用户的最小信息视图。
+     */
+    @GetMapping("/me")
+    public ResponseEntity<MeResponse> me(Authentication authentication) {
+        AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
+        AuthService.MeResult result = authService.me(principal);
+        return ResponseEntity.ok(new MeResponse(
+                HttpStatus.OK.value(),
+                String.valueOf(result.userId()),
+                result.email(),
+                result.role().name()));
+    }
 
-		return ResponseEntity.ok(new LoginResponse(
-				HttpStatus.OK.value(),
-				result.user().role().name()));
-	}
+    /**
+     * 从认证 Cookie 中提取 JWT。
+     */
+    private String extractToken(HttpServletRequest request) {
+        if (request.getCookies() == null)
+            return null;
+        String name = authProperties.cookie().name();
+        for (Cookie c : request.getCookies()) {
+            if (name.equals(c.getName()))
+                return c.getValue();
+        }
+        return null;
+    }
 
-	/**
-	 * 处理 POST /logout。
-	 *
-	 * <p>通过覆盖同名 Cookie 并设置 Max-Age=0 清除浏览器中的登录凭证。
-	 * 第一阶段 JWT 无服务端黑名单，退出后旧 token 在过期前理论上仍可被持有者使用；
-	 * 这是“短有效期 + 无 Refresh Token”方案的已知边界，后续可再引入撤销机制。</p>
-	 */
-	@PostMapping("/logout")
-	public ResponseEntity<LogoutResponse> logout(HttpServletResponse response) {
-		clearAccessTokenCookie(response);
-		return ResponseEntity.ok(new LogoutResponse(HttpStatus.OK.value()));
-	}
+    /**
+     * 写入访问令牌 Cookie。
+     *
+     * <p>
+     * Cookie 安全属性（secure/sameSite/path）统一由配置控制，
+     * 避免代码散落魔法值。
+     * </p>
+     */
+    private void writeAccessTokenCookie(HttpServletResponse response, String accessToken) {
+        AuthProperties.Cookie cookieConfig = authProperties.cookie();
+        ResponseCookie cookie = ResponseCookie.from(cookieConfig.name(), accessToken)
+                .httpOnly(true)
+                .secure(cookieConfig.secure())
+                .sameSite(cookieConfig.sameSite())
+                .path(cookieConfig.path())
+                .maxAge(authProperties.jwt().accessTokenTtlSeconds())
+                .build();
+        response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+    }
 
-	/**
-	 * 处理 GET /me。
-	 *
-	 * <p>前端启动或刷新时调用，用 Cookie 中的 JWT 恢复 userId / email / role。
-	 * 未登录由安全过滤器链返回 401 {@code UNAUTHORIZED}，本方法仅在已认证时进入。</p>
-	 *
-	 * <p>主体来自 {@link JwtAuthenticationFilter} 写入的 SecurityContext；
-	 * 查库与拒绝 DISABLED 在 {@link AuthService#me}。</p>
-	 */
-	@GetMapping("/me")
-	public ResponseEntity<MeResponse> me(Authentication authentication) {
-		// principal 类型由 JwtAuthenticationFilter 保证为 AuthenticatedUser
-		AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
-
-		// 业务异常由 AuthenticationExceptionHandler 映射为 401 JSON
-		AuthService.MeResult result = authService.me(principal);
-
-		// userId 按契约序列化为十进制字符串
-		return ResponseEntity.ok(new MeResponse(
-				HttpStatus.OK.value(),
-				String.valueOf(result.userId()),
-				result.email(),
-				result.role().name()));
-	}
-
-	/** 写入登录 Cookie：HttpOnly + 配置中的 Secure/SameSite/Path。 */
-	private void writeAccessTokenCookie(HttpServletResponse response, String accessToken) {
-		AuthProperties.Cookie cookieConfig = authProperties.cookie();
-		ResponseCookie cookie = ResponseCookie.from(cookieConfig.name(), accessToken)
-				.httpOnly(true)
-				.secure(cookieConfig.secure())
-				.sameSite(cookieConfig.sameSite())
-				.path(cookieConfig.path())
-				.maxAge(authProperties.jwt().accessTokenTtlSeconds())
-				.build();
-		// ResponseCookie 能正确序列化 SameSite；Servlet Cookie API 对 SameSite 支持较弱。
-		response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
-	}
-
-	/** 用 Max-Age=0 的同名 Cookie 通知浏览器删除登录凭证。 */
-	private void clearAccessTokenCookie(HttpServletResponse response) {
-		AuthProperties.Cookie cookieConfig = authProperties.cookie();
-		ResponseCookie cookie = ResponseCookie.from(cookieConfig.name(), "")
-				.httpOnly(true)
-				.secure(cookieConfig.secure())
-				.sameSite(cookieConfig.sameSite())
-				.path(cookieConfig.path())
-				.maxAge(0)
-				.build();
-		response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
-	}
+    /**
+     * 通过 maxAge=0 让浏览器立即删除访问令牌 Cookie。
+     */
+    private void clearAccessTokenCookie(HttpServletResponse response) {
+        AuthProperties.Cookie cookieConfig = authProperties.cookie();
+        ResponseCookie cookie = ResponseCookie.from(cookieConfig.name(), "")
+                .httpOnly(true)
+                .secure(cookieConfig.secure())
+                .sameSite(cookieConfig.sameSite())
+                .path(cookieConfig.path())
+                .maxAge(0)
+                .build();
+        response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+    }
 }
