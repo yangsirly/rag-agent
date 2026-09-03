@@ -13,7 +13,7 @@
 | 里程碑 | 状态 | 主要内容 |
 | --- | --- | --- |
 | [里程碑 01：用户注册](./milestone-01-registration.md) | 已实现，持续完善 | Spring MVC 请求链路、分层模型、BCrypt、MyBatis-Plus、事务、并发唯一约束、异常映射和测试 |
-| [里程碑 02：登录与认证](./milestone-02-authentication.md) | 核心路径已实现，集成测试待补 | 密码 matches、禁用检查、HMAC JWT 签发/验签、过滤器写 SecurityContext；端到端登录 HTTP 集成测试待补 |
+| [里程碑 02：登录与认证](./milestone-02-authentication.md) | 双 Token 核心路径已实现，MySQL 并发测试待补 | Access JWT（15 分钟）、随机 Refresh（固定 7 天）、会话行锁/严格轮换、jti 黑名单、Cookie 恢复与前端 single-flight |
 | [里程碑 03：聊天闭环](./milestone-03-chat-loop.md) | 业务已实现，集成测试已补 | `send` 单事务消息对、`clientMessageId` 三态幂等与并发兜底、所有权 404 伪装、最新页优先分页、游标与深分页保护 |
 | [里程碑 06：工业级高并发加固](./milestone-06-industrial-hardening.md) | 已实现并审查修复 | 软删替代 CASCADE（会话+消息双侧）、Hikari/Tomcat 池化、Redis Lua 限流 + SET NX 幂等快路径、JWT jti 黑名单、登录失败锁定、游标/深分页保护、429/黑名单、Prometheus；移除永不激活的 RabbitMQ 脚手架 |
 
@@ -46,7 +46,7 @@
 
 后续里程碑完成时，优先继续维护本目录，而不是把长篇原理说明堆进源码：
 
-- 登录 HTTP 集成测试：注册→登录→带 Cookie 访问；错误密码/禁用用户断言
+- 认证扩展测试：MySQL 上同一 Refresh Token 并发刷新只能一个成功，随后验证严格重放撤销
 - 聊天专项测试：在 [milestone-03-chat-loop.md](./milestone-03-chat-loop.md) 第 10.2 节清单基础上补 Service 单元测试、HTTP 集成测试与并发双发测试，并实测 MySQL 上的 V2 迁移
 - 权限与角色边界
 - 知识库和文档事务

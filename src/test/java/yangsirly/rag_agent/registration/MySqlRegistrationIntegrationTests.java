@@ -52,7 +52,7 @@ class MySqlRegistrationIntegrationTests {
 		try (Connection connection = dataSource.getConnection()) {
 			assertThat(connection.getMetaData().getDatabaseProductName()).isEqualTo("MySQL");
 		}
-		assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("1");
+		assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("6");
 
 		String email = "mysql-integration-" + UUID.randomUUID() + "@example.com";
 		String requestBody = """

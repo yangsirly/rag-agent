@@ -37,6 +37,11 @@ export const LoginResponseSchema = z.object({
 });
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
 
+export const RefreshResponseSchema = z.object({
+  statusCode: z.number(),
+});
+export type RefreshResponse = z.infer<typeof RefreshResponseSchema>;
+
 export const MeResponseSchema = z.object({
   statusCode: z.number(),
   userId: IdSchema,

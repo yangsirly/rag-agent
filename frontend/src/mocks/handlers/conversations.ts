@@ -11,10 +11,10 @@ import { unicodeLength } from "@/shared/lib/unicode";
 import { applyFault, err, json, parsePage, requireUser, UUID_RE } from "./utils";
 
 export const conversationHandlers = [
-  http.get("/api/conversations", async ({ request }) => {
+  http.get("/api/conversations", async ({ request, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     const user = auth.user!;
     const page = parsePage(new URL(request.url), 20);
@@ -25,10 +25,10 @@ export const conversationHandlers = [
     return json({ statusCode: 200, ...pageSlice(items, page.page!, page.size!) });
   }),
 
-  http.post("/api/conversations", async ({ request }) => {
+  http.post("/api/conversations", async ({ request, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     const user = auth.user!;
     const body = (await request.json().catch(() => ({}))) as { title?: string };
@@ -42,10 +42,10 @@ export const conversationHandlers = [
     return json({ statusCode: 201, ...conv }, { status: 201 });
   }),
 
-  http.get("/api/conversations/:id", async ({ request, params }) => {
+  http.get("/api/conversations/:id", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     const conv = getStore().conversations.find(
       (c) => c.id === params.id && c.userId === auth.user!.id,
@@ -54,10 +54,10 @@ export const conversationHandlers = [
     return json({ statusCode: 200, ...conv });
   }),
 
-  http.patch("/api/conversations/:id", async ({ request, params }) => {
+  http.patch("/api/conversations/:id", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     const conv = getStore().conversations.find(
       (c) => c.id === params.id && c.userId === auth.user!.id,
@@ -73,10 +73,10 @@ export const conversationHandlers = [
     return json({ statusCode: 200, ...conv });
   }),
 
-  http.delete("/api/conversations/:id", async ({ request, params }) => {
+  http.delete("/api/conversations/:id", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     const store = getStore();
     const idx = store.conversations.findIndex(
@@ -89,10 +89,10 @@ export const conversationHandlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  http.get("/api/conversations/:id/messages", async ({ request, params }) => {
+  http.get("/api/conversations/:id/messages", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     const conv = getStore().conversations.find(
       (c) => c.id === params.id && c.userId === auth.user!.id,
@@ -113,10 +113,10 @@ export const conversationHandlers = [
     return json({ statusCode: 200, items, page: p, size, totalElements, totalPages });
   }),
 
-  http.post("/api/conversations/:id/messages", async ({ request, params }) => {
+  http.post("/api/conversations/:id/messages", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     const store = getStore();
     const conv = store.conversations.find(

@@ -1,15 +1,14 @@
 import { delay, HttpResponse } from "msw";
 import {
-  findUserById,
   getStore,
   parseCookieToken,
-  userIdFromToken,
+  userFromToken,
 } from "@/mocks/data/store";
 import { appEnv } from "@/shared/lib/env";
 
 export function json(
   data: Record<string, unknown> | unknown[] | null,
-  init?: { status?: number; headers?: Record<string, string> },
+  init?: { status?: number; headers?: HeadersInit },
 ) {
   return HttpResponse.json(data as never, {
     status: init?.status ?? 200,
@@ -21,15 +20,29 @@ export function err(status: number, code: string, message: string) {
   return json({ statusCode: status, code, message }, { status });
 }
 
-export function getToken(request: Request): string | null {
-  return parseCookieToken(request.headers.get("cookie"));
+function decodeCookieValue(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
-export function requireUser(request: Request) {
-  const token = getToken(request);
-  const userId = userIdFromToken(token);
-  if (!userId) return { error: err(401, "UNAUTHORIZED", "未登录或凭证无效") };
-  const user = findUserById(userId);
+export function getToken(request: Request, cookies?: Record<string, string>): string | null {
+  return cookies?.access_token
+    ? decodeCookieValue(cookies.access_token)
+    : parseCookieToken(request.headers.get("cookie"));
+}
+
+export function getRefreshToken(request: Request, cookies?: Record<string, string>): string | null {
+  return cookies?.refresh_token
+    ? decodeCookieValue(cookies.refresh_token)
+    : parseCookieToken(request.headers.get("cookie"), "refresh_token");
+}
+
+export function requireUser(request: Request, cookies?: Record<string, string>) {
+  const token = getToken(request, cookies);
+  const user = userFromToken(token);
   if (!user || user.status !== "ACTIVE") {
     return { error: err(401, "UNAUTHORIZED", "未登录或凭证无效") };
   }

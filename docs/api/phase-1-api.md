@@ -1,8 +1,8 @@
 # 第一阶段前后端接口契约
 
-> 状态：草案 v0.2（2026-07-18）  
+> 状态：草案 v0.3（2026-09-03）  
 > 依据：[一阶段需求文档.md](../../一阶段需求文档.md)  
-> 已实现对齐：`POST /register`、`POST /login`（核心逻辑已实现，成功 HTTP 集成测试待补）、`POST /logout`、统一错误体与 Cookie 认证  
+> 已实现对齐：`POST /register`、`POST /login`、`POST /refresh`、`POST /logout`、统一错误体与双 Cookie 认证  
 > 用途：前端可按本文 Mock；后端未实现接口须按本文交付，变更需同步更新本文
 
 ## 1. 文档目标与范围
@@ -27,7 +27,7 @@
 
 - 真实大模型、RAG、文档解析、文件上传/对象存储
 - 手机号注册与真实短信验证码、找回密码、第三方登录
-- Refresh Token、服务端 token 黑名单、Redis、消息队列
+- 消息队列（真实模型接入前不实现）
 - 管理员后台、客户访问知识库管理端
 
 ### 1.4 与现有代码的关系
@@ -35,8 +35,9 @@
 | 接口 | 代码状态 | 说明 |
 | --- | --- | --- |
 | `POST /register` | 已实现 | 字段与错误码以代码与本文一致为准 |
-| `POST /login` | 核心登录逻辑已实现，成功 HTTP 集成测试待补 | 查库、密码校验、禁用检查、JWT 签发已接通 |
-| `POST /logout` | 已实现 | 清除 Cookie |
+| `POST /login` | 已实现 | 查库、密码校验、禁用检查、Access/Refresh 会话创建已接通 |
+| `POST /refresh` | 已实现 | Refresh 严格轮换、重放撤销与双 Cookie 更新 |
+| `POST /logout` | 已实现 | 当前 Access 加入黑名单、当前 Refresh 会话撤销并清除 Cookie |
 | 会话 / 消息 | 骨架已落地 | 路由、DTO、表结构与异常码已建；业务方法仍为 TODO（501） |
 | 知识库 / 文档 / 授权 | 未实现 | 本文为前后端共同契约 |
 
@@ -56,20 +57,22 @@
 ### 2.2 认证方式
 
 ```text
-方案：JWT Access Token + HttpOnly Cookie
-Cookie 名：access_token（可配置 security.auth.cookie.name）
-默认 TTL：1800 秒（30 分钟）
+方案：JWT Access Token + 随机 Refresh Token，均放在 HttpOnly Cookie
+Cookie 名：`access_token`（可配置 `security.auth.cookie.name`）、`refresh_token`（可配置 `security.auth.cookie.refresh-name`）
+Access TTL：900 秒（15 分钟）；Refresh 绝对 TTL：604800 秒（7 天，轮换不延长）
 Cookie 属性（默认）：HttpOnly; Path=/; SameSite=Lax; Secure 本地开发可为 false
 ```
 
 规则：
 
-1. 登录成功：响应头 `Set-Cookie` 写入 `access_token`，**响应体不返回 token 明文**。
-2. 后续需登录的请求：浏览器自动带 Cookie；前端无需手动拼 `Authorization`（第一阶段不要求 Bearer）。
-3. 退出登录：`Set-Cookie` 同名 Cookie 且 `Max-Age=0`。
-4. 未登录访问受保护接口：HTTP `401` + 统一错误体 `UNAUTHORIZED`；前端清理本地登录态并跳转登录页。
-5. 已登录但角色或对已可见资源的操作权限不足（如 CUSTOMER 调知识库接口、成员尝试删除知识库）：HTTP `403` + `FORBIDDEN`。
-6. 访问不存在或无权的**他人资源**（会话等）：统一返回 **`404` + `NOT_FOUND`**（避免泄露资源是否存在）。角色不足仍用 `403`。
+1. 登录成功：响应头 `Set-Cookie` 同时写入 `access_token` 与 `refresh_token`，**响应体不返回 token 明文**。
+2. 普通请求只由 `access_token` 进入 Spring Security；Refresh Token 不作为 Access 凭证解析。
+3. 普通接口第一次收到 `401 UNAUTHORIZED` 时，前端对 `/refresh` 做 single-flight 刷新，成功后仅重试原请求一次。
+4. Refresh 成功会轮换 Refresh Token；旧 Refresh Token 再次提交（包括并发晚到请求）会撤销整个设备会话，并统一返回 `401 UNAUTHORIZED`、清除两个 Cookie。
+5. 退出登录：服务端撤销当前设备 Refresh 会话并拉黑当前 Access `jti`，随后清除两个 Cookie；接口保持幂等 `200`。
+6. 未登录访问受保护接口：HTTP `401` + 统一错误体 `UNAUTHORIZED`；前端清理本地登录态并跳转登录页。
+7. 已登录但角色或对已可见资源的操作权限不足（如 CUSTOMER 调知识库接口、成员尝试删除知识库）：HTTP `403` + `FORBIDDEN`。
+8. 访问不存在或无权的**他人资源**（会话等）：统一返回 **`404` + `NOT_FOUND`**（避免泄露资源是否存在）。角色不足仍用 `403`。
 
 ### 2.3 匿名可访问
 
@@ -77,6 +80,7 @@ Cookie 属性（默认）：HttpOnly; Path=/; SameSite=Lax; Secure 本地开发�
 | --- | --- |
 | POST | `/register` |
 | POST | `/login` |
+| POST | `/refresh` |
 | POST | `/logout` |
 
 其余接口默认要求已认证。
@@ -283,7 +287,7 @@ PATCH 请求统一遵循以下语义：
 }
 ```
 
-**成功：200** + `Set-Cookie: access_token=...; HttpOnly; Path=/; SameSite=Lax; Max-Age=1800`
+**成功：200** + 两个 `Set-Cookie`：`access_token=...; HttpOnly; Path=/; SameSite=Lax; Max-Age=900` 与 `refresh_token=...; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`
 
 ```json
 {
@@ -304,14 +308,16 @@ PATCH 请求统一遵循以下语义：
 | 401 | `INVALID_CREDENTIALS` | 用户不存在或密码错误（文案统一，不暴露是否存在） |
 | 401 | `USER_DISABLED` | 账号禁用 |
 
-### 4.2 退出登录
+### 4.2 刷新登录态
 
-`POST /logout`  
-鉴权：匿名也可调用（便于清 Cookie）
+`POST /refresh`  
+鉴权：匿名（仅读取 HttpOnly `refresh_token` Cookie）
 
-**请求体**：无
+**请求体**：无；响应体永不返回 Token。
 
-**成功：200** + 清除 Cookie（`Max-Age=0`）
+服务端按 `sessionId.randomSecret` 解析 Refresh Token，在事务内锁定对应 `refresh_sessions` 行，使用常量时间比较 SHA-256 哈希。会话未撤销、未超过固定 7 天期限且用户仍为 `ACTIVE` 时，原子轮换 Refresh 哈希并签发新的 Access/Refresh Cookie；上一枚仍有效的 Access `jti` 同时加入黑名单。
+
+**成功：200**
 
 ```json
 {
@@ -319,9 +325,26 @@ PATCH 请求统一遵循以下语义：
 }
 ```
 
-**说明**：第一阶段的退出只删除当前浏览器保存的 Cookie，不提供服务端即时吊销。若旧 JWT 已被复制，持有者在其 `exp` 到期前（默认最长 30 分钟）仍可能使用；前端退出后应清本地用户信息并跳转登录页。接口与验收不得把该行为描述为“服务端凭证立即失效”。
+失败（缺失、畸形、过期、撤销、重放、用户禁用）对外均为 `401 UNAUTHORIZED`，并清除两个 Cookie，不区分具体原因。Refresh Cookie 不能当作 Access Token 访问受保护接口。
 
-### 4.3 当前用户
+### 4.3 退出登录
+
+`POST /logout`  
+鉴权：匿名也可调用（便于清 Cookie）
+
+**请求体**：无
+
+**成功：200** + 清除 `access_token`、`refresh_token`（均 `Max-Age=0`）
+
+```json
+{
+  "statusCode": 200
+}
+```
+
+**说明**：退出只影响当前设备会话：当前 Access `jti` 立即进入黑名单，Refresh 会话被撤销；其他设备的会话不受影响。黑名单/Redis 暂时不可用时沿用 fail-open 可用性策略，已签发 Access 最长仍可能使用至 15 分钟自然过期，但该会话不能继续刷新。
+
+### 4.4 当前用户
 
 `GET /me`  
 鉴权：已登录
@@ -341,7 +364,7 @@ PATCH 请求统一遵循以下语义：
 | --- | --- | --- |
 | 401 | `UNAUTHORIZED` | 未登录或 token 无效 |
 
-`GET /me` 是第一阶段必做接口。应用初始化或页面刷新时，前端先调用该接口恢复用户与角色状态；HttpOnly Cookie 仍有效时不得仅因内存状态丢失就要求用户重新登录。
+`GET /me` 是第一阶段必做接口。应用初始化或页面刷新时，前端先调用该接口恢复用户与角色状态；Access 过期但 Refresh 有效时，客户端先自动刷新再重试 `/me`，不得仅因内存状态丢失就要求用户重新登录。
 
 ---
 
@@ -880,12 +903,13 @@ v0.2 先交付“创建者管理自己的知识库”，以下路由**暂不注�
 
 ### 10.1 登录态
 
-1. 登录成功：保存 `/login` 响应中的 `role` 到内存状态，不存 token。
+1. 登录成功：保存 `/login` 响应中的 `role` 到内存状态，不存 token；两个 token 均由 HttpOnly Cookie 管理。
 2. 请求统一 `credentials: 'include'`（跨域时）。
-3. 任意接口 `401` + `code === 'UNAUTHORIZED'`：清 role、跳转登录页。
-4. `403`：提示无权限，不强制登出。
-5. 应用初始化或刷新页面：调用 `GET /me` 恢复用户信息；返回 401 时再进入未登录流程。
-6. 发送消息发生超时或网络错误：保留原 `clientMessageId` 重试；只有用户主动发起一条新消息时才生成新 UUID。
+3. 普通接口第一次 `401` + `code === 'UNAUTHORIZED'`：模块级 single-flight 调 `/refresh`；刷新成功后原请求最多重试一次。
+4. `/login`、`/refresh`、`/logout` 不触发自动刷新；刷新失败时清 role、查询缓存并跳转登录页。
+5. `403`：提示无权限，不强制登出。
+6. 应用初始化或刷新页面：调用 `GET /me`，自动受益于上述刷新机制。
+7. 发送消息发生超时或网络错误：保留原 `clientMessageId` 重试；只有用户主动发起一条新消息时才生成新 UUID。
 
 ### 10.2 建议页面与接口映射
 
@@ -913,9 +937,10 @@ v0.2 先交付“创建者管理自己的知识库”，以下路由**暂不注�
 | 方法 | 路径 | 鉴权 | 角色 | 实现状态 |
 | --- | --- | --- | --- | --- |
 | POST | `/register` | 匿名 | - | 已实现 |
-| POST | `/login` | 匿名 | - | 核心已实现/HTTP 集成测试待补 |
+| POST | `/login` | 匿名 | - | 已实现 |
+| POST | `/refresh` | 匿名 | - | 已实现 |
 | POST | `/logout` | 匿名 | - | 已实现 |
-| GET | `/me` | 登录 | 任意 | 待实现（一期必做） |
+| GET | `/me` | 登录 | 任意 | 已实现 |
 | POST | `/conversations` | 登录 | 任意 | 待实现 |
 | GET | `/conversations` | 登录 | 任意 | 待实现 |
 | GET | `/conversations/{id}` | 登录 | 任意 | 待实现 |
@@ -939,7 +964,7 @@ v0.2 先交付“创建者管理自己的知识库”，以下路由**暂不注�
 
 ---
 
-## 12. v0.2 已固定决策
+## 12. 已固定决策（v0.3，继承 v0.2）
 
 1. 删除类接口固定使用 HTTP `204` 且无响应体；重复删除返回 404。
 2. 无权访问他人会话/知识库对外统一 `404`，角色不足（CUSTOMER 调 EDITOR API）用 `403`。
@@ -949,13 +974,14 @@ v0.2 先交付“创建者管理自己的知识库”，以下路由**暂不注�
 6. 消息发送使用 `clientMessageId` + 数据库唯一约束实现幂等；前端防抖只改善交互体验。
 7. 列表分页 `page` 从 0 开始；消息列表的第 0 页特指最新一页。
 8. JSON 中所有数据库 ID 固定使用十进制字符串。
-9. 第一阶段退出只清浏览器 Cookie，不承诺服务端立即吊销已复制的 JWT。
+9. 双 Token：Access 15 分钟、Refresh 固定 7 天；Refresh 严格轮换，旧 Token 重放撤销当前设备会话。
+10. 退出登录拉黑当前 Access `jti`、撤销当前 Refresh 会话并清除两个 Cookie；多设备会话互不影响。
 
 ---
 
 ## 13. 变更流程
 
-1. 任一方需要改路径、字段或错误码：先改本文并升小版本（如 v0.2），再改代码/Mock。  
+1. 任一方需要改路径、字段或错误码：先改本文并升小版本（如 v0.3），再改代码/Mock。  
 2. 已实现接口以测试与本文冲突时：**以可运行测试 + 本文同步更新**为准，禁止只改一端。  
 3. 后端落地某模块后，把第 11 节「实现状态」更新为已实现，并在 PR/提交说明中引用章节号。
 

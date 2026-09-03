@@ -1,7 +1,7 @@
 # 里程碑：一阶段生产级前端
 
 > 对应代码：`frontend/`  
-> 契约：`docs/api/phase-1-api.md` v0.2  
+> 契约：`docs/api/phase-1-api.md` v0.3  
 > 适用版本：React 19、Vite 8、TanStack Query 5、Axios、Zod 4、MSW 2
 
 ## 目录
@@ -21,7 +21,7 @@
 
 ### 项目现象
 
-用户信息、会话列表、消息、知识库都来自 HTTP API；主题偏好、诊断抽屉开关是浏览器本地 UI 偏好。
+用户信息、会话列表、消息、知识库都来自 HTTP API；主题偏好、诊断抽屉开关是浏览器本地 UI 偏好。Access/Refresh 凭证由 HttpOnly Cookie 管理。
 
 ### 核心概念
 
@@ -53,16 +53,19 @@
 
 ### 项目现象
 
-登录成功响应体只有 `role`，**没有 token 字段**；浏览器自动保存 `access_token` Cookie。刷新页面后前端内存清空，但 Cookie 仍在。
+登录成功响应体只有 `role`，**没有 token 字段**；浏览器自动保存 15 分钟 `access_token` 与固定 7 天 `refresh_token`。刷新页面后前端内存清空，但 Cookie 仍在。
 
 ### 底层过程
 
 ```text
 POST /login → Set-Cookie: access_token=...; HttpOnly
+          → Set-Cookie: refresh_token=...; HttpOnly
 后续请求 → 浏览器自动带 Cookie
 刷新 → GET /me（withCredentials）
   ├─ 200：恢复 userId/email/role
-  └─ 401 UNAUTHORIZED：进入登录页
+  └─ 401 UNAUTHORIZED → single-flight POST /refresh
+       ├─ 200：浏览器更新双 Cookie，原请求只重试一次
+       └─ 401：清理 Query/内存状态并进入登录页
 ```
 
 ### 关键不变量
@@ -70,6 +73,7 @@ POST /login → Set-Cookie: access_token=...; HttpOnly
 - 只有 `401 + code===UNAUTHORIZED` 才清理登录态并跳转登录页。
 - `INVALID_CREDENTIALS` / `USER_DISABLED` 留在登录表单展示，**不**当会话过期。
 - `403 FORBIDDEN` 不退出登录。
+- `/login`、`/refresh`、`/logout` 不触发自动刷新，防止拦截器递归。
 
 ### 对应代码
 
@@ -112,7 +116,7 @@ SPA 有页面路由 `/login`，后端也有 `POST /login`。若前端与后端�
 
 ### 作用
 
-在无后端时用 **同一路径、同一错误码、同一分页语义** 模拟 v0.2 契约，使页面与契约测试可先验收。
+在无后端时用 **同一路径、同一错误码、同一分页语义** 模拟 v0.3 契约，使页面与契约测试可先验收。
 
 ### 结构
 
@@ -177,7 +181,7 @@ JavaScript `string.length` 按 UTF-16 码元计数，emoji 等可能长度为 2�
 ## 小实验
 
 1. Mock 登录 `customer@example.com`，发送消息后打开诊断抽屉，记录 `X-Client-Request-Id`。
-2. 在 DevTools 删掉 `access_token` Cookie，刷新页面，观察是否回到登录页。
+2. 在 DevTools 替换 `access_token` Cookie 但保留 `refresh_token`，刷新页面，观察 `/refresh` 自动恢复；再删除两个 Cookie，确认回到登录页。
 3. 修改 `ChatPage`：让重试也 `randomUUID()`，用 Mock 断网模拟，观察是否出现重复消息（再改回正确实现）。
 4. 将 `VITE_API_MODE=real` 并启动后端，对比未实现接口的 404 与 Mock 全绿差异。
 

@@ -87,4 +87,17 @@ public class AuthenticationExceptionHandler {
 				exception.getMessage());
 		return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
 	}
+
+	/**
+	 * Refresh 凭证失败统一返回 401，避免泄露是过期、伪造还是重放；
+	 * Controller 已在抛出异常前清理两个 Cookie。
+	 */
+	@ExceptionHandler(InvalidRefreshTokenException.class)
+	public ResponseEntity<ApiErrorResponse> handleInvalidRefreshToken(InvalidRefreshTokenException exception) {
+		ApiErrorResponse response = new ApiErrorResponse(
+				HttpStatus.UNAUTHORIZED.value(),
+				"UNAUTHORIZED",
+				"Authentication is required");
+		return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+	}
 }

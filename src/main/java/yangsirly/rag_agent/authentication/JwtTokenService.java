@@ -1,20 +1,28 @@
 package yangsirly.rag_agent.authentication;
 
 /**
- * JWT 签发与校验端口。
+ * Access JWT 签发与校验端口。
  *
- * <p>当前里程碑只搭骨架：接口契约已经固定，真正的 HMAC 签发/验签
- * 在后续任务中实现。Controller 和过滤器应只依赖本接口，便于测试替换。</p>
+ * <p>Refresh Token 不属于 JWT，也不应被这个端口解析；它由
+ * {@link RefreshSessionMapper} 对应的会话服务负责一次性轮换。</p>
  */
 public interface JwtTokenService {
 
 	/**
-	 * 为已认证用户签发 Access Token。
+	 * 为已认证用户签发带会话绑定的 Access Token。
 	 *
 	 * @param user 已通过密码校验的用户主体
-	 * @return JWT 字符串（紧凑序列化形式）
+	 * @param sessionId 当前设备的 Refresh 会话 ID
+	 * @return 包含 JWT、jti 和过期时间的签发结果
 	 */
-	String issueAccessToken(AuthenticatedUser user);
+	IssuedAccessToken issueAccessToken(AuthenticatedUser user, String sessionId);
+
+	/**
+	 * 兼容只关心字符串的旧调用方/单元测试；生产登录必须传入会话 ID。
+	 */
+	default String issueAccessToken(AuthenticatedUser user) {
+		return issueAccessToken(user, java.util.UUID.randomUUID().toString()).value();
+	}
 
 	/**
 	 * 解析并校验 Access Token。
@@ -38,4 +46,7 @@ public interface JwtTokenService {
 	 * logout 计算黑名单 TTL 用：TTL 与剩余有效期对齐。
 	 */
 	java.util.Date extractExpiration(String token);
+
+	/** 提取 Access JWT 绑定的 Refresh 会话 ID；无效时返回 null。 */
+	String extractSessionId(String token);
 }

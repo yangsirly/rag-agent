@@ -1,14 +1,17 @@
 package yangsirly.rag_agent.authentication;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.util.Date;
 import java.util.UUID;
 
 import javax.crypto.SecretKey;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jws;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -16,8 +19,10 @@ import io.jsonwebtoken.security.Keys;
 import yangsirly.rag_agent.registration.User;
 
 /**
- * 工业级 JWT 实现：新增 jti 用于黑名单与幂等。
- * 学习笔记：docs/learning/milestone-06-industrial-hardening.md#3.3
+ * HMAC Access JWT 实现。
+ *
+ * <p>JWT 只承担短期访问凭证职责；长期 Refresh 凭证由数据库会话表管理。
+ * Access JWT 通过 typ 和 sid 与 Refresh 会话绑定，避免把另一种凭证误当成访问令牌。</p>
  */
 @Service
 public class JwtTokenServiceImpl implements JwtTokenService {
@@ -26,129 +31,132 @@ public class JwtTokenServiceImpl implements JwtTokenService {
     static final String CLAIM_ROLE = "role";
     static final String CLAIM_STATUS = "status";
     static final String CLAIM_JTI = "jti";
+    static final String CLAIM_SESSION_ID = "sid";
+    static final String ACCESS_TOKEN_TYPE = "access";
 
-    /**
-     * 构造 JWT 服务。
-     */
     private final AuthProperties authProperties;
+    private final Clock clock;
 
-    public JwtTokenServiceImpl(AuthProperties authProperties) {
+    /** Spring 使用可替换的 UTC Clock；测试可注入 FixedClock。 */
+    @Autowired
+    public JwtTokenServiceImpl(AuthProperties authProperties, Clock clock) {
         this.authProperties = authProperties;
+        this.clock = clock;
     }
 
-    /**
-     * 签发访问令牌并写入标准 claims + 业务 claims。
-     *
-     * <p>
-     * jti 每次随机生成，供 logout 黑名单与幂等审计使用。
-     * </p>
-     */
+    /** 保留直接实例化的旧测试构造器，生产 Bean 走上面的注入构造器。 */
+    public JwtTokenServiceImpl(AuthProperties authProperties) {
+        this(authProperties, Clock.systemUTC());
+    }
+
     @Override
-    public String issueAccessToken(AuthenticatedUser user) {
-        if (user == null || user.userId() == null) {
-            throw new IllegalArgumentException("Authenticated user and userId must not be null");
+    public IssuedAccessToken issueAccessToken(AuthenticatedUser user, String sessionId) {
+        if (user == null || user.userId() == null || sessionId == null || sessionId.isBlank()) {
+            throw new IllegalArgumentException("Authenticated user, userId and sessionId must not be null");
         }
-        Date issuedAt = new Date();
+        Date issuedAt = Date.from(clock.instant());
         Date expiresAt = new Date(issuedAt.getTime() + authProperties.jwt().accessTokenTtlSeconds() * 1000L);
         String jti = UUID.randomUUID().toString();
-        return Jwts.builder()
+        String value = Jwts.builder()
+                .header().type(ACCESS_TOKEN_TYPE).and()
                 .subject(String.valueOf(user.userId()))
                 .issuer(authProperties.jwt().issuer())
                 .issuedAt(issuedAt)
                 .expiration(expiresAt)
                 .id(jti)
+                .claim(CLAIM_JTI, jti)
+                .claim(CLAIM_SESSION_ID, sessionId)
                 .claim(CLAIM_EMAIL, user.email())
                 .claim(CLAIM_ROLE, user.role().name())
                 .claim(CLAIM_STATUS, user.status().name())
-                .claim(CLAIM_JTI, jti)
                 .signWith(signingKey())
                 .compact();
+        return new IssuedAccessToken(value, jti, sessionId, issuedAt, expiresAt);
     }
 
-    /**
-     * 解析并验证访问令牌。
-     *
-     * <p>
-     * 校验签名、issuer、过期时间；解析失败统一映射为
-     * InvalidAccessTokenException。
-     * </p>
-     */
     @Override
     public AuthenticatedUser parseAccessToken(String token) {
         if (token == null || token.isBlank()) {
             throw new InvalidAccessTokenException("Access token must not be blank");
         }
         try {
-            Claims claims = Jwts.parser()
-                    .verifyWith(signingKey())
-                    .requireIssuer(authProperties.jwt().issuer())
-                    .build()
-                    .parseSignedClaims(token)
-                    .getPayload();
+            Jws<Claims> signed = parseClaims(token);
+            if (!ACCESS_TOKEN_TYPE.equals(signed.getHeader().getType())) {
+                throw new InvalidAccessTokenException("Token type is not access");
+            }
+            Claims claims = signed.getPayload();
             Long userId = Long.valueOf(claims.getSubject());
             String email = claims.get(CLAIM_EMAIL, String.class);
             String roleName = claims.get(CLAIM_ROLE, String.class);
             String statusName = claims.get(CLAIM_STATUS, String.class);
             String jti = claims.getId();
+            String sessionId = claims.get(CLAIM_SESSION_ID, String.class);
             if (jti == null) {
                 jti = claims.get(CLAIM_JTI, String.class);
             }
-            if (email == null || roleName == null || statusName == null || jti == null) {
+            if (claims.getExpiration() == null || email == null || roleName == null || statusName == null
+                    || jti == null || sessionId == null || sessionId.isBlank()) {
                 throw new InvalidAccessTokenException("Access token claims are incomplete");
             }
             return new AuthenticatedUser(userId, email, User.Role.valueOf(roleName), User.Status.valueOf(statusName));
+        } catch (InvalidAccessTokenException exception) {
+            throw exception;
         } catch (JwtException | IllegalArgumentException exception) {
             throw new InvalidAccessTokenException("Access token is invalid or expired", exception);
         }
     }
 
-    /**
-     * 提取 jti，供黑名单检查使用。
-     *
-     * <p>
-     * 失败返回 null，调用方按未携带 jti 处理。
-     * </p>
-     */
     @Override
     public String extractJti(String token) {
         try {
-            Claims claims = Jwts.parser()
-                    .verifyWith(signingKey())
-                    .requireIssuer(authProperties.jwt().issuer())
-                    .build()
-                    .parseSignedClaims(token)
-                    .getPayload();
-            String jti = claims.getId();
-            if (jti == null) {
-                jti = claims.get(CLAIM_JTI, String.class);
+            Jws<Claims> signed = parseClaims(token);
+            if (!ACCESS_TOKEN_TYPE.equals(signed.getHeader().getType())) {
+                return null;
             }
-            return jti;
-        } catch (Exception e) {
+            Claims claims = signed.getPayload();
+            String jti = claims.getId();
+            return jti != null ? jti : claims.get(CLAIM_JTI, String.class);
+        } catch (Exception exception) {
             return null;
         }
     }
 
-    /**
-     * 提取过期时间，供 logout 计算黑名单 TTL。
-     */
     @Override
     public Date extractExpiration(String token) {
         try {
-            Claims claims = Jwts.parser()
-                    .verifyWith(signingKey())
-                    .requireIssuer(authProperties.jwt().issuer())
-                    .build()
-                    .parseSignedClaims(token)
-                    .getPayload();
-            return claims.getExpiration();
-        } catch (Exception e) {
+            Jws<Claims> signed = parseClaims(token);
+            return ACCESS_TOKEN_TYPE.equals(signed.getHeader().getType())
+                    ? signed.getPayload().getExpiration()
+                    : null;
+        } catch (Exception exception) {
             return null;
         }
     }
 
-    /**
-     * 基于配置密钥生成 HMAC 签名 key。
-     */
+    @Override
+    public String extractSessionId(String token) {
+        try {
+            Jws<Claims> signed = parseClaims(token);
+            return ACCESS_TOKEN_TYPE.equals(signed.getHeader().getType())
+                    ? signed.getPayload().get(CLAIM_SESSION_ID, String.class)
+                    : null;
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
+    private Jws<Claims> parseClaims(String token) {
+        if (token == null || token.isBlank()) {
+            throw new InvalidAccessTokenException("Access token must not be blank");
+        }
+        return Jwts.parser()
+                .verifyWith(signingKey())
+                .requireIssuer(authProperties.jwt().issuer())
+                .clock(() -> Date.from(clock.instant()))
+                .build()
+                .parseSignedClaims(token);
+    }
+
     private SecretKey signingKey() {
         byte[] secretBytes = authProperties.jwt().secret().getBytes(StandardCharsets.UTF_8);
         return Keys.hmacShaKeyFor(secretBytes);

@@ -12,10 +12,10 @@ import { unicodeLength } from "@/shared/lib/unicode";
 import { applyFault, canSeeKb, err, json, parsePage, requireUser } from "./utils";
 
 export const knowledgeBaseHandlers = [
-  http.get("/api/knowledge-bases", async ({ request }) => {
+  http.get("/api/knowledge-bases", async ({ request, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     const user = auth.user!;
     if (user.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问知识库");
@@ -37,10 +37,10 @@ export const knowledgeBaseHandlers = [
     return json({ statusCode: 200, ...pageSlice(items, page.page!, page.size!) });
   }),
 
-  http.post("/api/knowledge-bases", async ({ request }) => {
+  http.post("/api/knowledge-bases", async ({ request, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     const user = auth.user!;
     if (user.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问知识库");
@@ -66,10 +66,10 @@ export const knowledgeBaseHandlers = [
     return json({ statusCode: 201, ...kb }, { status: 201 });
   }),
 
-  http.get("/api/knowledge-bases/:id", async ({ request, params }) => {
+  http.get("/api/knowledge-bases/:id", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问知识库");
     if (canSeeKb(auth.user!.id, String(params.id)) !== "ok") {
@@ -79,10 +79,10 @@ export const knowledgeBaseHandlers = [
     return json({ statusCode: 200, ...kb });
   }),
 
-  http.patch("/api/knowledge-bases/:id", async ({ request, params }) => {
+  http.patch("/api/knowledge-bases/:id", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问知识库");
     if (canSeeKb(auth.user!.id, String(params.id)) !== "ok") {
@@ -107,10 +107,10 @@ export const knowledgeBaseHandlers = [
     return json({ statusCode: 200, ...kb });
   }),
 
-  http.delete("/api/knowledge-bases/:id", async ({ request, params }) => {
+  http.delete("/api/knowledge-bases/:id", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问知识库");
     const store = getStore();
@@ -128,10 +128,10 @@ export const knowledgeBaseHandlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  http.get("/api/knowledge-bases/:id/documents", async ({ request, params }) => {
+  http.get("/api/knowledge-bases/:id/documents", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问知识库");
     if (canSeeKb(auth.user!.id, String(params.id)) !== "ok") {
@@ -146,10 +146,10 @@ export const knowledgeBaseHandlers = [
     return json({ statusCode: 200, ...pageSlice(items, page.page!, page.size!) });
   }),
 
-  http.post("/api/knowledge-bases/:id/documents", async ({ request, params }) => {
+  http.post("/api/knowledge-bases/:id/documents", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问知识库");
     if (canSeeKb(auth.user!.id, String(params.id)) !== "ok") {
@@ -185,10 +185,10 @@ export const knowledgeBaseHandlers = [
     return json({ statusCode: 201, ...doc }, { status: 201 });
   }),
 
-  http.get("/api/knowledge-bases/:kbId/documents/:docId", async ({ request, params }) => {
+  http.get("/api/knowledge-bases/:kbId/documents/:docId", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问知识库");
     if (canSeeKb(auth.user!.id, String(params.kbId)) !== "ok") {
@@ -201,10 +201,10 @@ export const knowledgeBaseHandlers = [
     return json({ statusCode: 200, ...doc });
   }),
 
-  http.patch("/api/knowledge-bases/:kbId/documents/:docId", async ({ request, params }) => {
+  http.patch("/api/knowledge-bases/:kbId/documents/:docId", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问知识库");
     if (canSeeKb(auth.user!.id, String(params.kbId)) !== "ok") {
@@ -242,10 +242,10 @@ export const knowledgeBaseHandlers = [
     return json({ statusCode: 200, ...doc });
   }),
 
-  http.delete("/api/knowledge-bases/:kbId/documents/:docId", async ({ request, params }) => {
+  http.delete("/api/knowledge-bases/:kbId/documents/:docId", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问知识库");
     if (canSeeKb(auth.user!.id, String(params.kbId)) !== "ok") {
@@ -260,10 +260,10 @@ export const knowledgeBaseHandlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  http.get("/api/knowledge-bases/:id/members", async ({ request, params }) => {
+  http.get("/api/knowledge-bases/:id/members", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问");
     const kb = getStore().knowledgeBases.find((k) => k.id === params.id);
@@ -285,10 +285,10 @@ export const knowledgeBaseHandlers = [
     return json({ statusCode: 200, items });
   }),
 
-  http.post("/api/knowledge-bases/:id/members", async ({ request, params }) => {
+  http.post("/api/knowledge-bases/:id/members", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问");
     const kb = getStore().knowledgeBases.find((k) => k.id === params.id);
@@ -325,10 +325,10 @@ export const knowledgeBaseHandlers = [
     return json({ statusCode: 201, ...member }, { status: 201 });
   }),
 
-  http.delete("/api/knowledge-bases/:kbId/members/:userId", async ({ request, params }) => {
+  http.delete("/api/knowledge-bases/:kbId/members/:userId", async ({ request, params, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问");
     const kb = getStore().knowledgeBases.find((k) => k.id === params.kbId);

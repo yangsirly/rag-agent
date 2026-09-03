@@ -69,7 +69,7 @@ public class SecurityConfiguration {
                                                 .authenticationEntryPoint(authenticationEntryPoint)
                                                 .accessDeniedHandler(accessDeniedHandler))
                                 .authorizeHttpRequests(authorize -> authorize
-                                                .requestMatchers(HttpMethod.POST, "/register", "/login").permitAll()
+                                                .requestMatchers(HttpMethod.POST, "/register", "/login", "/refresh").permitAll()
                                                 .requestMatchers(HttpMethod.POST, "/logout").permitAll()
                                                 .requestMatchers("/actuator/health", "/actuator/prometheus",
                                                                 "/actuator/metrics")

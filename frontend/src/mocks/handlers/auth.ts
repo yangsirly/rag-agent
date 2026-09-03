@@ -1,17 +1,18 @@
 import { http } from "msw";
 import {
-  clearCookieHeader,
   clearSession,
-  cookieHeader,
+  clearCookieHeaders,
+  cookieHeaders,
   createSession,
   findUserByEmail,
-  findUserById,
   getStore,
   nextId,
+  rotateSession,
+  sessionTokens,
 } from "@/mocks/data/store";
 import { normalizeEmail } from "@/shared/lib/validation";
 import { unicodeLength } from "@/shared/lib/unicode";
-import { applyFault, err, getToken, json, requireUser } from "./utils";
+import { applyFault, err, getRefreshToken, getToken, json, requireUser } from "./utils";
 
 export const authHandlers = [
   http.post("/api/register", async ({ request }) => {
@@ -54,27 +55,59 @@ export const authHandlers = [
       return err(401, "USER_DISABLED", "账号已禁用");
     }
     const token = createSession(user.id);
+    const tokens = sessionTokens(token)!;
     return json(
       { statusCode: 200, role: user.role },
-      { status: 200, headers: { "Set-Cookie": cookieHeader(token) } },
+      { status: 200, headers: cookieHeaders(tokens.accessToken, tokens.refreshToken) },
     );
   }),
 
-  http.post("/api/logout", async ({ request }) => {
-    const token = getToken(request);
-    clearSession(token);
-    return json(
-      { statusCode: 200 },
-      { status: 200, headers: { "Set-Cookie": clearCookieHeader() } },
-    );
-  }),
-
-  http.get("/api/me", async ({ request }) => {
+  http.post("/api/refresh", async ({ request, cookies }) => {
     const fault = await applyFault();
     if (fault) return fault;
-    const auth = requireUser(request);
+    const rotated = rotateSession(getRefreshToken(request, cookies));
+    if (!rotated) {
+      return json(
+        { statusCode: 401, code: "UNAUTHORIZED", message: "未登录或凭证无效" },
+        { status: 401, headers: clearCookieHeaders() },
+      );
+    }
+    const user = findUserByEmail(rotated.email) ?? {
+      id: rotated.userId,
+      email: rotated.email,
+      password: "",
+      role: rotated.role,
+      status: "ACTIVE" as const,
+    };
+    if (!user || user.status !== "ACTIVE") {
+      rotated.revoked = true;
+      return json(
+        { statusCode: 401, code: "UNAUTHORIZED", message: "未登录或凭证无效" },
+        { status: 401, headers: clearCookieHeaders() },
+      );
+    }
+    return json(
+      { statusCode: 200 },
+      { status: 200, headers: cookieHeaders(rotated.accessToken, rotated.refreshToken) },
+    );
+  }),
+
+  http.post("/api/logout", async ({ request, cookies }) => {
+    const token = getToken(request, cookies);
+    clearSession(token);
+    clearSession(getRefreshToken(request, cookies));
+    return json(
+      { statusCode: 200 },
+      { status: 200, headers: clearCookieHeaders() },
+    );
+  }),
+
+  http.get("/api/me", async ({ request, cookies }) => {
+    const fault = await applyFault();
+    if (fault) return fault;
+    const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
-    const user = findUserById(auth.user!.id)!;
+    const user = auth.user!;
     return json({
       statusCode: 200,
       userId: user.id,

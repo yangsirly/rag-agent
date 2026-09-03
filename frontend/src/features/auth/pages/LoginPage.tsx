@@ -38,10 +38,18 @@ export function LoginPage() {
   const mutation = useMutation({
     mutationFn: (values: FormValues) => loginApi(values.email, values.password),
     onSuccess: async () => {
+      // 登录前的 bootstrap /me 可能仍在飞行中；取消它，避免迟到的匿名 401
+      // 触发全局登出处理覆盖刚建立的登录态。
+      await queryClient.cancelQueries({ queryKey: ["auth", "me"] });
       // 登录响应只有 role；再拉 /me 拿完整用户信息，保证刷新与导航一致
       const me = await meApi();
       setUser({ userId: me.userId, email: me.email, role: me.role });
-      await queryClient.invalidateQueries();
+      // 把 bootstrap 查询直接置为成功，避免登录前的匿名 401 迟到后把用户清空；
+      // 其余业务查询仍按原行为失效，进入页面后会按新身份重新加载。
+      queryClient.setQueryData(["auth", "me"], me);
+      await queryClient.invalidateQueries({
+        predicate: (query) => query.queryKey[0] !== "auth",
+      });
       navigate(from, { replace: true });
     },
   });

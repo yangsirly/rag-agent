@@ -3,6 +3,7 @@ import {
   findUserByEmail,
   getStore,
   resetStore,
+  sessionTokens,
   setFault,
   type MockFault,
 } from "@/mocks/data/store";
@@ -21,5 +22,7 @@ export async function switchMockUser(email: string) {
   const store = getStore();
   store.sessions = {};
   const token = createSession(user.id);
-  document.cookie = `access_token=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=1800`;
+  const tokens = sessionTokens(token)!;
+  document.cookie = `access_token=${encodeURIComponent(tokens.accessToken)}; Path=/; SameSite=Lax; Max-Age=900`;
+  document.cookie = `refresh_token=${encodeURIComponent(tokens.refreshToken)}; Path=/; SameSite=Lax; Max-Age=604800`;
 }

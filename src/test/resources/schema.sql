@@ -16,7 +16,26 @@ CREATE TABLE IF NOT EXISTS users (
     CONSTRAINT ck_users_status CHECK (status IN ('ACTIVE', 'DISABLED'))
 );
 
--- 测试库使用 H2：与 Flyway V3/V4/V5 语义对齐，语法按 H2 简化（无 UNSIGNED / COMMENT）。
+CREATE TABLE IF NOT EXISTS refresh_sessions (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    token_hash VARBINARY(32) NOT NULL,
+    current_access_jti VARCHAR(36),
+    current_access_expires_at TIMESTAMP NULL,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revoked_at TIMESTAMP NULL,
+    CONSTRAINT uk_refresh_sessions_token_hash UNIQUE (token_hash),
+    CONSTRAINT fk_refresh_sessions_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_sessions_user_expires
+    ON refresh_sessions (user_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_refresh_sessions_expires
+    ON refresh_sessions (expires_at);
+
+-- 测试库使用 H2：与 Flyway V3/V4/V5/V6 语义对齐，语法按 H2 简化（无 UNSIGNED / COMMENT）。
 CREATE TABLE IF NOT EXISTS conversations (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT NOT NULL,

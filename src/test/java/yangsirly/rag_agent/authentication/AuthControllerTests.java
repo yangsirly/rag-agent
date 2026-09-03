@@ -6,6 +6,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import org.hamcrest.Matchers;
@@ -25,7 +28,8 @@ import jakarta.servlet.http.Cookie;
  * 认证模块的 HTTP 边界集成测试。
  *
  * <p>覆盖：登录成功写 Cookie、错误密码 / 不存在账号统一 401、
- * 禁用用户登录拒绝、校验错误、匿名 401、退出清 Cookie，以及登录后禁用再调 /me。</p>
+	 * 禁用用户登录拒绝、校验错误、匿名 401、双 Cookie 刷新/轮换、退出清 Cookie，
+	 * 以及登录后禁用再调 /me。</p>
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -72,11 +76,14 @@ class AuthControllerTests {
 	@Test
 	void logoutClearsAccessTokenCookie() throws Exception {
 		// 即使当前未登录，退出也应返回 200，并下发 Max-Age=0 的同名 Cookie。
-		mockMvc.perform(post("/logout"))
+		MvcResult logout = mockMvc.perform(post("/logout"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.statusCode").value(200))
 				.andExpect(header().string("Set-Cookie", Matchers.containsString("access_token=")))
-				.andExpect(header().string("Set-Cookie", Matchers.containsString("Max-Age=0")));
+				.andExpect(header().string("Set-Cookie", Matchers.containsString("Max-Age=0")))
+				.andReturn();
+		org.assertj.core.api.Assertions.assertThat(logout.getResponse().getCookie("refresh_token")).isNotNull();
+		org.assertj.core.api.Assertions.assertThat(logout.getResponse().getCookie("refresh_token").getMaxAge()).isZero();
 	}
 
 	@Test
@@ -102,6 +109,163 @@ class AuthControllerTests {
 		Cookie cookie = login.getResponse().getCookie("access_token");
 		org.assertj.core.api.Assertions.assertThat(cookie).isNotNull();
 		org.assertj.core.api.Assertions.assertThat(cookie.getValue()).isNotBlank();
+		org.assertj.core.api.Assertions.assertThat(cookie.getMaxAge()).isEqualTo(900);
+		org.assertj.core.api.Assertions.assertThat(cookie.isHttpOnly()).isTrue();
+		Cookie refreshCookie = login.getResponse().getCookie("refresh_token");
+		org.assertj.core.api.Assertions.assertThat(refreshCookie).isNotNull();
+		org.assertj.core.api.Assertions.assertThat(refreshCookie.getValue()).isNotBlank();
+		org.assertj.core.api.Assertions.assertThat(refreshCookie.getMaxAge()).isEqualTo(604800);
+		org.assertj.core.api.Assertions.assertThat(refreshCookie.isHttpOnly()).isTrue();
+	}
+
+	@Test
+	void refreshRotatesBothCookiesAndRejectsOldRefreshToken() throws Exception {
+		String email = "refresh-rotate-" + UUID.randomUUID() + "@example.com";
+		String password = "password-ok-1";
+		registerUser(email, password);
+		MvcResult login = mockMvc.perform(post("/login")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(loginBody(email, password)))
+				.andExpect(status().isOk())
+				.andReturn();
+		Cookie access = login.getResponse().getCookie("access_token");
+		Cookie refresh = login.getResponse().getCookie("refresh_token");
+		org.assertj.core.api.Assertions.assertThat(access).isNotNull();
+		org.assertj.core.api.Assertions.assertThat(refresh).isNotNull();
+
+		MvcResult rotated = mockMvc.perform(post("/refresh").cookie(refresh, access))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.statusCode").value(200))
+				.andExpect(jsonPath("$.token").doesNotExist())
+				.andReturn();
+		Cookie nextAccess = rotated.getResponse().getCookie("access_token");
+		Cookie nextRefresh = rotated.getResponse().getCookie("refresh_token");
+		org.assertj.core.api.Assertions.assertThat(nextAccess).isNotNull();
+		org.assertj.core.api.Assertions.assertThat(nextRefresh).isNotNull();
+		org.assertj.core.api.Assertions.assertThat(nextAccess.getValue()).isNotEqualTo(access.getValue());
+		org.assertj.core.api.Assertions.assertThat(nextRefresh.getValue()).isNotEqualTo(refresh.getValue());
+
+		// 旧 Refresh 被严格视为重放：撤销整个设备会话，并清除两个 Cookie。
+		MvcResult replay = mockMvc.perform(post("/refresh").cookie(refresh))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+				.andExpect(header().string("Set-Cookie", Matchers.containsString("access_token=")))
+				.andExpect(header().string("Set-Cookie", Matchers.containsString("Max-Age=0")))
+				.andReturn();
+		org.assertj.core.api.Assertions.assertThat(replay.getResponse().getCookie("refresh_token")).isNotNull();
+		org.assertj.core.api.Assertions.assertThat(replay.getResponse().getCookie("refresh_token").getMaxAge()).isZero();
+
+		SecurityContextHolder.clearContext();
+		mockMvc.perform(get("/me").cookie(nextAccess))
+				.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void separateDeviceSessionsDoNotRevokeEachOther() throws Exception {
+		String email = "refresh-devices-" + UUID.randomUUID() + "@example.com";
+		String password = "password-ok-1";
+		registerUser(email, password);
+		MvcResult firstLogin = mockMvc.perform(post("/login")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(loginBody(email, password))).andExpect(status().isOk()).andReturn();
+		MvcResult secondLogin = mockMvc.perform(post("/login")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(loginBody(email, password))).andExpect(status().isOk()).andReturn();
+		Cookie firstAccess = firstLogin.getResponse().getCookie("access_token");
+		Cookie firstRefresh = firstLogin.getResponse().getCookie("refresh_token");
+		Cookie secondAccess = secondLogin.getResponse().getCookie("access_token");
+		org.assertj.core.api.Assertions.assertThat(firstAccess).isNotNull();
+		org.assertj.core.api.Assertions.assertThat(firstRefresh).isNotNull();
+		org.assertj.core.api.Assertions.assertThat(secondAccess).isNotNull();
+
+		mockMvc.perform(post("/logout").cookie(firstAccess, firstRefresh)).andExpect(status().isOk());
+		SecurityContextHolder.clearContext();
+		mockMvc.perform(get("/me").cookie(secondAccess)).andExpect(status().isOk());
+	}
+
+	@Test
+	void refreshTokenCannotBeUsedAsAccessToken() throws Exception {
+		String email = "refresh-type-" + UUID.randomUUID() + "@example.com";
+		String password = "password-ok-1";
+		registerUser(email, password);
+		MvcResult login = mockMvc.perform(post("/login")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(loginBody(email, password))).andExpect(status().isOk()).andReturn();
+		Cookie refresh = login.getResponse().getCookie("refresh_token");
+		org.assertj.core.api.Assertions.assertThat(refresh).isNotNull();
+		SecurityContextHolder.clearContext();
+		mockMvc.perform(get("/me").cookie(new Cookie("access_token", refresh.getValue())))
+				.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void disabledUserCannotRefresh() throws Exception {
+		String email = "refresh-disabled-" + UUID.randomUUID() + "@example.com";
+		String password = "password-ok-1";
+		registerUser(email, password);
+		MvcResult login = mockMvc.perform(post("/login")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(loginBody(email, password))).andExpect(status().isOk()).andReturn();
+		Cookie refresh = login.getResponse().getCookie("refresh_token");
+		org.assertj.core.api.Assertions.assertThat(refresh).isNotNull();
+		jdbcTemplate.update("UPDATE users SET status = 'DISABLED' WHERE email = ?", email);
+		mockMvc.perform(post("/refresh").cookie(refresh))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+				.andExpect(header().string("Set-Cookie", Matchers.containsString("access_token=")))
+				.andExpect(header().string("Set-Cookie", Matchers.containsString("Max-Age=0")));
+	}
+
+	@Test
+	void refreshWithoutCookieReturnsGenericUnauthorizedAndClearsBothCookies() throws Exception {
+		MvcResult result = mockMvc.perform(post("/refresh"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+				.andExpect(header().string("Set-Cookie", Matchers.containsString("access_token=")))
+				.andExpect(header().string("Set-Cookie", Matchers.containsString("Max-Age=0")))
+				.andReturn();
+		org.assertj.core.api.Assertions.assertThat(result.getResponse().getCookie("refresh_token")).isNotNull();
+		org.assertj.core.api.Assertions.assertThat(result.getResponse().getCookie("refresh_token").getMaxAge()).isZero();
+	}
+
+	@Test
+	void refreshRejectsMalformedTokenAndClearsBothCookies() throws Exception {
+		MvcResult result = mockMvc.perform(post("/refresh")
+				.cookie(new Cookie("refresh_token", "not-a-refresh-token")))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+				.andExpect(header().string("Set-Cookie", Matchers.containsString("access_token=")))
+				.andExpect(header().string("Set-Cookie", Matchers.containsString("Max-Age=0")))
+				.andReturn();
+		org.assertj.core.api.Assertions.assertThat(result.getResponse().getCookie("refresh_token")).isNotNull();
+		org.assertj.core.api.Assertions.assertThat(result.getResponse().getCookie("refresh_token").getMaxAge()).isZero();
+	}
+
+	@Test
+	void refreshRejectsExpiredSessionAndClearsBothCookies() throws Exception {
+		String email = "refresh-expired-" + UUID.randomUUID() + "@example.com";
+		String password = "password-ok-1";
+		registerUser(email, password);
+		MvcResult login = mockMvc.perform(post("/login")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(loginBody(email, password)))
+				.andExpect(status().isOk())
+				.andReturn();
+		Cookie refresh = login.getResponse().getCookie("refresh_token");
+		org.assertj.core.api.Assertions.assertThat(refresh).isNotNull();
+
+		String sessionId = RefreshTokenUtil.sessionId(refresh.getValue());
+		jdbcTemplate.update("UPDATE refresh_sessions SET expires_at = ? WHERE id = ?",
+				Timestamp.valueOf(LocalDateTime.now(ZoneOffset.UTC).minusSeconds(1)), sessionId);
+
+		MvcResult result = mockMvc.perform(post("/refresh").cookie(refresh))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+				.andExpect(header().string("Set-Cookie", Matchers.containsString("access_token=")))
+				.andExpect(header().string("Set-Cookie", Matchers.containsString("Max-Age=0")))
+				.andReturn();
+		org.assertj.core.api.Assertions.assertThat(result.getResponse().getCookie("refresh_token")).isNotNull();
+		org.assertj.core.api.Assertions.assertThat(result.getResponse().getCookie("refresh_token").getMaxAge()).isZero();
 	}
 
 	@Test

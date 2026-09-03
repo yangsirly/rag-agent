@@ -29,7 +29,7 @@ import yangsirly.rag_agent.registration.UserMapper;
 @Service
 public class AuthService {
 
-    private final JwtTokenService jwtTokenService;
+    private final RefreshSessionService refreshSessionService;
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final Clock clock;
@@ -37,13 +37,13 @@ public class AuthService {
     private final StringRedisTemplate stringRedisTemplate;
 
     public AuthService(
-            JwtTokenService jwtTokenService,
+            RefreshSessionService refreshSessionService,
             UserMapper userMapper,
             PasswordEncoder passwordEncoder,
             Clock clock,
             AuthLockProperties authLockProperties,
             @Autowired(required = false) StringRedisTemplate stringRedisTemplate) {
-        this.jwtTokenService = jwtTokenService;
+        this.refreshSessionService = refreshSessionService;
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.clock = clock;
@@ -103,8 +103,8 @@ public class AuthService {
                 user.getEmail(),
                 user.getRole(),
                 user.getStatus());
-        String accessToken = jwtTokenService.issueAccessToken(authenticatedUser);
-        return new LoginResult(authenticatedUser, accessToken);
+        TokenPair tokens = refreshSessionService.createSession(authenticatedUser);
+        return new LoginResult(authenticatedUser, tokens);
     }
 
     /**
@@ -186,8 +186,8 @@ public class AuthService {
                 user.getRole());
     }
 
-    /** 登录结果：携带当前用户与签发的访问令牌。 */
-    public record LoginResult(AuthenticatedUser user, String accessToken) {
+    /** 登录结果：携带当前用户与两个 Cookie 凭证。 */
+    public record LoginResult(AuthenticatedUser user, TokenPair tokens) {
     }
 
     /** /me 接口返回模型：仅暴露最小身份信息。 */

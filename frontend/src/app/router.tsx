@@ -66,17 +66,21 @@ function RequireEditor() {
 
 function UnauthorizedBridge() {
   const navigate = useNavigate();
+  const location = useLocation();
   const clear = useAuthStore((s) => s.clear);
   const qc = useQueryClient();
 
   useEffect(() => {
     setUnauthorizedHandler(() => {
       clear();
+      // 公共认证页上的匿名请求（尤其是启动时的 /me）失败是预期路径；
+      // 不清查询缓存，否则 BootstrapGate 可能重新挂载页面并清空用户正在填写的表单。
+      if (location.pathname === "/login" || location.pathname === "/register") return;
       void qc.clear();
       navigate("/login", { replace: true });
     });
     return () => setUnauthorizedHandler(null);
-  }, [clear, navigate, qc]);
+  }, [clear, location.pathname, navigate, qc]);
 
   return null;
 }

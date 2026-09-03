@@ -18,7 +18,7 @@
 | 数据库 ID 在 JSON 中序列化为**十进制字符串** | 2.1、12.8 |
 | 时间字段 ISO-8601（UTC 或带偏移） | 2.1 |
 | 统一错误体 `{statusCode, code, message}`，`message` 不含密码/token/堆栈 | 2.5 |
-| 认证方式：JWT + HttpOnly Cookie `access_token` | 2.2 |
+| 认证方式：Access JWT（15 分钟）+ 随机 Refresh（固定 7 天），均为 HttpOnly Cookie | phase-1-api.md 2.2 |
 | 无权访问他人资源统一 `404 NOT_FOUND`；角色不足 `403 FORBIDDEN` | 2.2 第 5、6 条 |
 | 幂等键 `clientMessageId` 为标准 UUID，重试保持不变 | 2.7 |
 

@@ -1,9 +1,9 @@
 package yangsirly.rag_agent.authentication;
 
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 /**
@@ -17,6 +17,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
  * </p>
  */
 @Configuration
+@EnableScheduling
 public class AuthConfiguration {
 
     /**

@@ -1,7 +1,8 @@
-import { requestAndParse } from "@/shared/api/client";
+import { beginAuthTransition, requestAndParse } from "@/shared/api/client";
 import {
   LoginResponseSchema,
   MeResponseSchema,
+  RefreshResponseSchema,
   StatusOnlySchema,
   type LoginResponse,
   type MeResponse,
@@ -15,6 +16,7 @@ export async function registerApi(email: string, password: string): Promise<void
 }
 
 export async function loginApi(email: string, password: string): Promise<LoginResponse> {
+  beginAuthTransition();
   return requestAndParse(
     { method: "POST", url: "/login", data: { email, password } },
     LoginResponseSchema,
@@ -22,7 +24,12 @@ export async function loginApi(email: string, password: string): Promise<LoginRe
 }
 
 export async function logoutApi(): Promise<void> {
+  beginAuthTransition();
   await requestAndParse({ method: "POST", url: "/logout" }, StatusOnlySchema);
+}
+
+export async function refreshApi(): Promise<void> {
+  await requestAndParse({ method: "POST", url: "/refresh" }, RefreshResponseSchema);
 }
 
 export async function meApi(): Promise<MeResponse> {
