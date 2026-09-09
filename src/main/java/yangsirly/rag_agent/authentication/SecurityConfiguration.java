@@ -74,6 +74,7 @@ public class SecurityConfiguration {
                                                 .requestMatchers("/actuator/health", "/actuator/prometheus",
                                                                 "/actuator/metrics")
                                                 .permitAll()
+                                                .requestMatchers("/knowledge-bases", "/knowledge-bases/**").hasRole("EDITOR")
                                                 .anyRequest().authenticated())
                                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 

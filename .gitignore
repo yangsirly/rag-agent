@@ -34,6 +34,8 @@ build/
 ### VS Code ###
 .vscode/
 
+.workbuddy/
+
 frontend/dist
 frontend/coverage
 frontend/playwright-report

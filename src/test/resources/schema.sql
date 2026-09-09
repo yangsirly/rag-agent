@@ -77,3 +77,68 @@ CREATE TABLE IF NOT EXISTS messages (
     ),
     CONSTRAINT ck_messages_status CHECK (status IN ('DONE', 'PENDING'))
 );
+
+CREATE TABLE IF NOT EXISTS knowledge_bases (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    creator_id BIGINT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description VARCHAR(1000),
+    editor_ids JSON,
+    reader_ids JSON,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL,
+    CONSTRAINT uk_knowledge_bases_creator_name UNIQUE (creator_id, name),
+    CONSTRAINT fk_knowledge_bases_creator FOREIGN KEY (creator_id) REFERENCES users (id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_bases_creator_updated
+    ON knowledge_bases (creator_id, deleted_at, updated_at);
+
+CREATE TABLE IF NOT EXISTS documents (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    knowledge_base_id BIGINT NOT NULL,
+    creator_id BIGINT NOT NULL,
+    title VARCHAR(100) NOT NULL,
+    summary VARCHAR(500),
+    content CLOB NOT NULL,
+    content_length INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL,
+    CONSTRAINT uk_documents_kb_title UNIQUE (knowledge_base_id, title),
+    CONSTRAINT uk_documents_kb_id UNIQUE (knowledge_base_id, id),
+    CONSTRAINT fk_documents_knowledge_base FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_bases (id) ON DELETE RESTRICT,
+    CONSTRAINT fk_documents_creator FOREIGN KEY (creator_id) REFERENCES users (id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_documents_kb_updated
+    ON documents (knowledge_base_id, deleted_at, updated_at);
+
+-- 与 Flyway V9 对齐：P2.1 先把 embedding 作为 JSON 持久化，由 Java 做 Exact Search。
+CREATE TABLE IF NOT EXISTS document_chunks (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    knowledge_base_id BIGINT NOT NULL,
+    document_id BIGINT NOT NULL,
+    chunk_index INT NOT NULL,
+    content CLOB NOT NULL,
+    start_offset INT NOT NULL,
+    end_offset INT NOT NULL,
+    embedding JSON,
+    embedding_model VARCHAR(100),
+    embedding_dimension INT,
+    source_document_updated_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_document_chunks_document_version_index UNIQUE (document_id, source_document_updated_at, chunk_index),
+    CONSTRAINT fk_document_chunks_document_scope
+        FOREIGN KEY (knowledge_base_id, document_id)
+        REFERENCES documents (knowledge_base_id, id)
+        ON DELETE CASCADE,
+    CONSTRAINT ck_document_chunks_offsets CHECK (end_offset > start_offset),
+    CONSTRAINT ck_document_chunks_embedding_metadata CHECK (
+        (embedding IS NULL AND embedding_model IS NULL AND embedding_dimension IS NULL)
+        OR
+        (embedding IS NOT NULL AND embedding_model IS NOT NULL AND embedding_dimension > 0)
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_kb_document_version
+    ON document_chunks (knowledge_base_id, document_id, source_document_updated_at);

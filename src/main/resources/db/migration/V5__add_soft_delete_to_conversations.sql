@@ -6,4 +6,7 @@
 -- 这样既满足"删除同一会话后再次删除返回 404"的契约，又消除了级联删除大事务。
 ALTER TABLE conversations ADD COLUMN deleted_at DATETIME(6) NULL COMMENT '软删除时间，NULL=有效';
 -- 列表按 (user_id, updated_at) 过滤软删会话；为避免软删行干扰，索引覆盖 deleted_at。
-CREATE INDEX idx_conversations_user_updated ON conversations (user_id, deleted_at, updated_at);
+-- V2 已创建同名索引；同一 ALTER 原子替换，同时维持 user_id 外键所需的索引。
+ALTER TABLE conversations
+    DROP INDEX idx_conversations_user_updated,
+    ADD INDEX idx_conversations_user_updated (user_id, deleted_at, updated_at, id);
