@@ -119,9 +119,7 @@ export const conversationHandlers = [
     const auth = requireUser(request, cookies);
     if ("error" in auth && auth.error) return auth.error;
     const store = getStore();
-    const conv = store.conversations.find(
-      (c) => c.id === params.id && c.userId === auth.user!.id,
-    );
+    const conv = store.conversations.find((c) => c.id === params.id && c.userId === auth.user!.id);
     if (!conv) return err(404, "NOT_FOUND", "会话不存在");
     const body = (await request.json()) as { clientMessageId?: string; content?: string };
     if (!body.clientMessageId || !UUID_RE.test(body.clientMessageId)) {
@@ -166,9 +164,6 @@ export const conversationHandlers = [
     };
     store.messages.push(userMessage, assistantMessage);
     conv.updatedAt = assistantMessage.createdAt;
-    return json(
-      { statusCode: 201, userMessage, assistantMessage },
-      { status: 201 },
-    );
+    return json({ statusCode: 201, userMessage, assistantMessage }, { status: 201 });
   }),
 ];

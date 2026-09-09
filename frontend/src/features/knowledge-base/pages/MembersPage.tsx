@@ -1,9 +1,15 @@
-import { Button, Card, Form, Input, List, Typography, message } from "antd";
+import { App, Button, Card, Form, Input, List, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
-import { getKnowledgeBase, grantMember, listMembers, revokeMember } from "@/features/knowledge-base/api";
+import {
+  getKnowledgeBase,
+  grantMember,
+  listMembers,
+  revokeMember,
+} from "@/features/knowledge-base/api";
 import { appEnv } from "@/shared/lib/env";
 import { emailField } from "@/shared/lib/validation";
+import { getUserFacingError } from "@/shared/api/errors";
 import { ConfirmDeleteButton } from "@/shared/ui/ConfirmDeleteButton";
 import { PageState } from "@/shared/ui/PageState";
 import { t } from "@/shared/i18n";
@@ -11,6 +17,7 @@ import styles from "./kb.module.css";
 
 export function MembersPage() {
   const i18n = t();
+  const { message } = App.useApp();
   const { id = "" } = useParams();
   const qc = useQueryClient();
   const [form] = Form.useForm<{ email: string }>();
@@ -34,7 +41,7 @@ export function MembersPage() {
       form.resetFields();
       await qc.invalidateQueries({ queryKey: ["members", id] });
     },
-    onError: (e: Error) => message.error(e.message || i18n.common.unknownError),
+    onError: (error) => message.error(getUserFacingError(error)),
   });
 
   const revokeMut = useMutation({
@@ -43,6 +50,7 @@ export function MembersPage() {
       message.success(i18n.common.success);
       await qc.invalidateQueries({ queryKey: ["members", id] });
     },
+    onError: (error) => message.error(getUserFacingError(error)),
   });
 
   if (!appEnv.enableKbMembership) {
@@ -77,7 +85,7 @@ export function MembersPage() {
 
         <PageState
           loading={membersQuery.isLoading}
-          error={membersQuery.isError ? i18n.common.unknownError : null}
+          error={membersQuery.isError ? getUserFacingError(membersQuery.error) : null}
           onRetry={() => void membersQuery.refetch()}
           empty={!membersQuery.isLoading && (membersQuery.data?.items.length ?? 0) === 0}
           emptyDescription={i18n.kb.emptyMembers}

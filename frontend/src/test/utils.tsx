@@ -21,7 +21,7 @@ export function renderWithProviders(
   function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={client}>
-        <ConfigProvider>
+        <ConfigProvider theme={{ token: { motion: false } }}>
           <AntApp>
             <MemoryRouter initialEntries={[options?.route ?? "/"]}>{children}</MemoryRouter>
           </AntApp>

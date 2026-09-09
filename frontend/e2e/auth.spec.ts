@@ -15,12 +15,12 @@ test.describe("auth flow", () => {
     await page.getByRole("button", { name: /登\s*录/ }).click();
     await expect(page).toHaveURL(/\/chat/, { timeout: 15_000 });
 
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(500);
     // 保留 Refresh Cookie，手动替换 Access Cookie，验证页面刷新会自动续期。
-    await page.context().addCookies([
-      { name: "access_token", value: "expired-access", url: "http://127.0.0.1:5173" },
-    ]);
+    await page
+      .context()
+      .addCookies([
+        { name: "access_token", value: "expired-access", url: new URL(page.url()).origin },
+      ]);
     await page.reload();
     await expect(page).toHaveURL(/\/chat/);
     await expect(page.getByText(email)).toBeVisible();

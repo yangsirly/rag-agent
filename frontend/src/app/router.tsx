@@ -1,4 +1,4 @@
-import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { Result, Button, Spin } from "antd";
 import { LoginPage } from "@/features/auth/pages/LoginPage";
 import { RegisterPage } from "@/features/auth/pages/RegisterPage";
@@ -17,14 +17,22 @@ import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
 function BootstrapGate({ children }: { children: React.ReactNode }) {
-  const { isLoading, bootstrapped } = useAuthBootstrap();
-  if (!bootstrapped || isLoading) {
+  const { isLoading, status, refetch } = useAuthBootstrap();
+  if (isLoading) {
     return (
       <div style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
         <Spin size="large" tip={t().common.loading} />
       </div>
     );
   }
+  if (status === "error")
+    return (
+      <Result
+        status="error"
+        title="无法恢复登录状态"
+        extra={<Button onClick={() => void refetch()}>重新尝试</Button>}
+      />
+    );
   return <>{children}</>;
 }
 
@@ -32,7 +40,13 @@ function RequireAuth() {
   const user = useAuthStore((s) => s.user);
   const location = useLocation();
   if (!user) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: location.pathname + location.search + location.hash }}
+      />
+    );
   }
   return <Outlet />;
 }
@@ -54,9 +68,9 @@ function RequireEditor() {
         title="403"
         subTitle={i18n.common.forbidden}
         extra={
-          <Button type="primary" href="/chat">
-            {i18n.nav.chat}
-          </Button>
+          <Link to="/chat">
+            <Button type="primary">{i18n.nav.chat}</Button>
+          </Link>
         }
       />
     );
@@ -120,9 +134,9 @@ export function AppRouter() {
               title="404"
               subTitle={i18n.common.notFound}
               extra={
-                <Button type="primary" href="/chat">
-                  {i18n.nav.chat}
-                </Button>
+                <Link to="/chat">
+                  <Button type="primary">{i18n.nav.chat}</Button>
+                </Link>
               }
             />
           }

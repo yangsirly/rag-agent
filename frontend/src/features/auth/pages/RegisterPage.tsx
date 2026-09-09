@@ -1,4 +1,5 @@
-import { Alert, Button, Card, Form, Input, Typography, message } from "antd";
+import { useRetryAfter } from "@/shared/hooks/useRetryAfter";
+import { Alert, Button, Card, Form, Input, Typography, App } from "antd";
 import { Link, useNavigate } from "react-router-dom";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -19,6 +20,8 @@ type FormValues = z.infer<typeof schema>;
 
 export function RegisterPage() {
   const i18n = t();
+  const { message } = App.useApp();
+  const cooldown = useRetryAfter();
   const navigate = useNavigate();
 
   const {
@@ -32,6 +35,7 @@ export function RegisterPage() {
 
   const mutation = useMutation({
     mutationFn: (values: FormValues) => registerApi(values.email, values.password),
+    onError: cooldown.start,
     onSuccess: () => {
       message.success(i18n.auth.registerSuccess);
       navigate("/login", { replace: true });
@@ -52,10 +56,21 @@ export function RegisterPage() {
           {i18n.auth.registerTitle}
         </Typography.Title>
         <Typography.Paragraph type="secondary">{i18n.auth.passwordHint}</Typography.Paragraph>
-        {errorMessage ? <Alert type="error" showIcon message={errorMessage} style={{ marginBottom: 16 }} /> : null}
-        <Form layout="vertical" onFinish={handleSubmit((v) => mutation.mutate(v))}>
+        <Typography.Paragraph type="secondary">
+          新注册账号默认为普通用户。编辑者权限由系统管理员分配。
+        </Typography.Paragraph>
+        {errorMessage ? (
+          <Alert type="error" showIcon message={errorMessage} style={{ marginBottom: 16 }} />
+        ) : null}
+        <Form
+          layout="vertical"
+          onFinish={handleSubmit((v) => {
+            if (!cooldown.seconds) mutation.mutate(v);
+          })}
+        >
           <Form.Item
-            label={i18n.auth.email} htmlFor="register-email"
+            label={i18n.auth.email}
+            htmlFor="register-email"
             validateStatus={errors.email ? "error" : undefined}
             help={errors.email?.message}
           >
@@ -68,7 +83,8 @@ export function RegisterPage() {
             />
           </Form.Item>
           <Form.Item
-            label={i18n.auth.password} htmlFor="register-password"
+            label={i18n.auth.password}
+            htmlFor="register-password"
             validateStatus={errors.password ? "error" : undefined}
             help={errors.password?.message}
           >
@@ -85,8 +101,15 @@ export function RegisterPage() {
               )}
             />
           </Form.Item>
-          <Button type="primary" htmlType="submit" block size="large" loading={mutation.isPending}>
-            {i18n.auth.register}
+          <Button
+            type="primary"
+            htmlType="submit"
+            block
+            size="large"
+            loading={mutation.isPending}
+            disabled={cooldown.seconds > 0}
+          >
+            {cooldown.seconds ? cooldown.seconds + " 秒后可重试" : i18n.auth.register}
           </Button>
         </Form>
         <div className={styles.footer}>

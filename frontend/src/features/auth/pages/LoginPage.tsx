@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { useRetryAfter } from "@/shared/hooks/useRetryAfter";
 import { Alert, Button, Card, Form, Input, Typography } from "antd";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useForm, Controller } from "react-hook-form";
@@ -20,6 +22,8 @@ type FormValues = z.infer<typeof schema>;
 
 export function LoginPage() {
   const i18n = t();
+  const cooldown = useRetryAfter();
+  const [loginSucceeded, setLoginSucceeded] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const setUser = useAuthStore((s) => s.setUser);
@@ -35,14 +39,13 @@ export function LoginPage() {
     defaultValues: { email: "", password: "" },
   });
 
-  const mutation = useMutation({
-    mutationFn: (values: FormValues) => loginApi(values.email, values.password),
-    onSuccess: async () => {
+  const profileMutation = useMutation({
+    mutationFn: meApi,
+    onSuccess: async (me) => {
       // 登录前的 bootstrap /me 可能仍在飞行中；取消它，避免迟到的匿名 401
       // 触发全局登出处理覆盖刚建立的登录态。
       await queryClient.cancelQueries({ queryKey: ["auth", "me"] });
       // 登录响应只有 role；再拉 /me 拿完整用户信息，保证刷新与导航一致
-      const me = await meApi();
       setUser({ userId: me.userId, email: me.email, role: me.role });
       // 把 bootstrap 查询直接置为成功，避免登录前的匿名 401 迟到后把用户清空；
       // 其余业务查询仍按原行为失效，进入页面后会按新身份重新加载。
@@ -54,8 +57,21 @@ export function LoginPage() {
     },
   });
 
+  const mutation = useMutation({
+    mutationFn: (values: FormValues) => loginApi(values.email, values.password),
+    onError: cooldown.start,
+    onSuccess: () => {
+      setLoginSucceeded(true);
+      profileMutation.mutate();
+    },
+  });
+
   const errorMessage =
-    mutation.error instanceof AppApiError ? mapLoginError(mutation.error) : mutation.error ? i18n.common.unknownError : null;
+    mutation.error instanceof AppApiError
+      ? mapLoginError(mutation.error)
+      : mutation.error
+        ? i18n.common.unknownError
+        : null;
 
   return (
     <div className={styles.page}>
@@ -64,10 +80,29 @@ export function LoginPage() {
           {i18n.auth.loginTitle}
         </Typography.Title>
         <Typography.Paragraph type="secondary">{i18n.appSubtitle}</Typography.Paragraph>
-        {errorMessage ? <Alert type="error" showIcon message={errorMessage} style={{ marginBottom: 16 }} /> : null}
-        <Form layout="vertical" onFinish={handleSubmit((v) => mutation.mutate(v))}>
+        {errorMessage ? (
+          <Alert type="error" showIcon message={errorMessage} style={{ marginBottom: 16 }} />
+        ) : null}
+        {profileMutation.isError ? (
+          <Alert
+            type="error"
+            message="登录成功，但无法加载用户信息。"
+            action={
+              <Button loading={profileMutation.isPending} onClick={() => profileMutation.mutate()}>
+                重试加载用户信息
+              </Button>
+            }
+          />
+        ) : null}
+        <Form
+          layout="vertical"
+          onFinish={handleSubmit((v) => {
+            if (!cooldown.seconds && !loginSucceeded) mutation.mutate(v);
+          })}
+        >
           <Form.Item
-            label={i18n.auth.email} htmlFor="login-email"
+            label={i18n.auth.email}
+            htmlFor="login-email"
             validateStatus={errors.email ? "error" : undefined}
             help={errors.email?.message}
           >
@@ -80,7 +115,8 @@ export function LoginPage() {
             />
           </Form.Item>
           <Form.Item
-            label={i18n.auth.password} htmlFor="login-password"
+            label={i18n.auth.password}
+            htmlFor="login-password"
             validateStatus={errors.password ? "error" : undefined}
             help={errors.password?.message}
           >
@@ -97,8 +133,15 @@ export function LoginPage() {
               )}
             />
           </Form.Item>
-          <Button type="primary" htmlType="submit" block size="large" loading={mutation.isPending}>
-            {i18n.auth.login}
+          <Button
+            type="primary"
+            htmlType="submit"
+            block
+            size="large"
+            loading={mutation.isPending || profileMutation.isPending}
+            disabled={cooldown.seconds > 0 || loginSucceeded}
+          >
+            {cooldown.seconds ? cooldown.seconds + " 秒后可重试" : i18n.auth.login}
           </Button>
         </Form>
         <div className={styles.footer}>

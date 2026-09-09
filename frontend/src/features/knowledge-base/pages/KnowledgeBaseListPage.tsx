@@ -1,4 +1,7 @@
-import { Button, Card, Form, Input, List, Modal, Pagination, Typography, message } from "antd";
+import { unicodeLength } from "@/shared/lib/unicode";
+import { useAuthStore } from "@/features/auth/auth-store";
+import { getUserFacingError } from "@/shared/api/errors";
+import { Button, Card, Form, Input, List, Modal, Pagination, Typography, App } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -12,12 +15,13 @@ import {
 import { ConfirmDeleteButton } from "@/shared/ui/ConfirmDeleteButton";
 import { PageState } from "@/shared/ui/PageState";
 import { t } from "@/shared/i18n";
-import { kbDescriptionField, kbNameField } from "@/shared/lib/validation";
-import { z } from "zod";
+import { kbDescriptionField, kbNameField, zodFormRule } from "@/shared/lib/validation";
 import styles from "./kb.module.css";
 
 export function KnowledgeBaseListPage() {
   const i18n = t();
+  const { message } = App.useApp();
+  const user = useAuthStore((s) => s.user);
   const qc = useQueryClient();
   const [page, setPage] = useState(0);
   const [open, setOpen] = useState(false);
@@ -45,13 +49,15 @@ export function KnowledgeBaseListPage() {
       form.resetFields();
       await qc.invalidateQueries({ queryKey: ["knowledge-bases"] });
     },
-    onError: (e: Error) => message.error(e.message || i18n.common.unknownError),
+    onError: (e: Error) => message.error(getUserFacingError(e)),
   });
 
   const deleteMut = useMutation({
     mutationFn: deleteKnowledgeBase,
+    onError: (error) => message.error(getUserFacingError(error)),
     onSuccess: async () => {
       message.success(i18n.common.success);
+      if (page > 0 && query.data?.items.length === 1) setPage(page - 1);
       await qc.invalidateQueries({ queryKey: ["knowledge-bases"] });
     },
   });
@@ -77,7 +83,7 @@ export function KnowledgeBaseListPage() {
 
       <PageState
         loading={query.isLoading}
-        error={query.isError ? i18n.common.unknownError : null}
+        error={query.isError ? getUserFacingError(query.error) : null}
         onRetry={() => void query.refetch()}
         empty={!query.isLoading && (query.data?.items.length ?? 0) === 0}
         emptyDescription={i18n.kb.empty}
@@ -104,12 +110,14 @@ export function KnowledgeBaseListPage() {
                   >
                     {i18n.common.edit}
                   </Button>,
-                  <ConfirmDeleteButton
-                    key="del"
-                    title={i18n.kb.deleteConfirm}
-                    onConfirm={() => deleteMut.mutateAsync(item.id)}
-                    loading={deleteMut.isPending}
-                  />,
+                  item.creatorId === user?.userId ? (
+                    <ConfirmDeleteButton
+                      key="del"
+                      title={i18n.kb.deleteConfirm}
+                      onConfirm={() => deleteMut.mutate(item.id)}
+                      loading={deleteMut.isPending}
+                    />
+                  ) : null,
                 ]}
               >
                 <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }}>
@@ -143,26 +151,20 @@ export function KnowledgeBaseListPage() {
         cancelText={i18n.common.cancel}
         destroyOnHidden
       >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={(values) => {
-            try {
-              kbNameField.parse(values.name);
-              if (values.description) kbDescriptionField.parse(values.description);
-              saveMut.mutate(values);
-            } catch (e) {
-              if (e instanceof z.ZodError) {
-                message.error(e.issues[0]?.message ?? i18n.common.unknownError);
-              }
-            }
-          }}
-        >
-          <Form.Item name="name" label={i18n.kb.name} rules={[{ required: true, message: i18n.common.required }]}>
-            <Input maxLength={100} showCount />
+        <Form form={form} layout="vertical" onFinish={(values) => saveMut.mutate(values)}>
+          <Form.Item name="name" label={i18n.kb.name} rules={[zodFormRule(kbNameField)]}>
+            <Input count={{ show: true, max: 16, strategy: unicodeLength }} showCount />
           </Form.Item>
-          <Form.Item name="description" label={i18n.kb.description}>
-            <Input.TextArea maxLength={1000} showCount rows={3} />
+          <Form.Item
+            name="description"
+            label={i18n.kb.description}
+            rules={[zodFormRule(kbDescriptionField)]}
+          >
+            <Input.TextArea
+              count={{ show: true, max: 100, strategy: unicodeLength }}
+              showCount
+              rows={3}
+            />
           </Form.Item>
         </Form>
       </Modal>

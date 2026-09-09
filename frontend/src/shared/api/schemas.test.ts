@@ -1,3 +1,4 @@
+import { MessageSchema } from "./schemas";
 import { describe, expect, it } from "vitest";
 import {
   LoginResponseSchema,
@@ -64,4 +65,16 @@ describe("zod contracts", () => {
     });
     expect(page.items).toEqual([]);
   });
+});
+
+it("accepts nullable message linkage emitted by the Java API", () => {
+  const base = { id: "1", conversationId: "2", content: "hello", createdAt: "2026-09-07" };
+  expect(
+    MessageSchema.safeParse({
+      ...base,
+      role: "ASSISTANT",
+      clientMessageId: null,
+      replyToMessageId: "3",
+    }).success,
+  ).toBe(true);
 });

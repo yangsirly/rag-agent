@@ -38,13 +38,7 @@ export type PendingSend = {
 export function useSendMessage(conversationId: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      clientMessageId,
-      content,
-    }: {
-      clientMessageId: string;
-      content: string;
-    }) => {
+    mutationFn: ({ clientMessageId, content }: { clientMessageId: string; content: string }) => {
       if (!conversationId) throw new Error("missing conversationId");
       // 重试必须复用同一 clientMessageId（由调用方保证）
       return sendMessage(conversationId, clientMessageId, content);

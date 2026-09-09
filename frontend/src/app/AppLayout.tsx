@@ -8,9 +8,10 @@ import {
   SunOutlined,
   DesktopOutlined,
 } from "@ant-design/icons";
-import { Button, Drawer, Layout, Menu, Space, Typography, Grid, theme } from "antd";
+import { Button, Drawer, Layout, Menu, Space, Typography, Grid, theme, App } from "antd";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { AppApiError } from "@/shared/api/errors";
 import { logoutApi } from "@/features/auth/api";
 import { isEditor, useAuthStore } from "@/features/auth/auth-store";
 import { appEnv } from "@/shared/lib/env";
@@ -30,6 +31,7 @@ const { Header, Content, Sider } = Layout;
 
 export function AppLayout() {
   const i18n = t();
+  const { message } = App.useApp();
   const navigate = useNavigate();
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
@@ -47,16 +49,21 @@ export function AppLayout() {
 
   const logoutMut = useMutation({
     mutationFn: logoutApi,
-    onSettled: async () => {
+    onError: (error) => {
+      if (error instanceof AppApiError && error.statusCode === 401) {
+        clear();
+        queryClient.clear();
+        navigate("/login", { replace: true });
+      } else message.error("退出登录未完成，请重试");
+    },
+    onSuccess: async () => {
       clear();
       await queryClient.clear();
       navigate("/login", { replace: true });
     },
   });
 
-  const selected = location.pathname.startsWith("/knowledge-bases")
-    ? "kb"
-    : "chat";
+  const selected = location.pathname.startsWith("/knowledge-bases") ? "kb" : "chat";
 
   const menuItems = [
     { key: "chat", icon: <MessageOutlined />, label: i18n.nav.chat },
@@ -72,7 +79,11 @@ export function AppLayout() {
   };
 
   const ThemeIcon =
-    themePreference === "light" ? SunOutlined : themePreference === "dark" ? MoonOutlined : DesktopOutlined;
+    themePreference === "light"
+      ? SunOutlined
+      : themePreference === "dark"
+        ? MoonOutlined
+        : DesktopOutlined;
 
   const navMenu = (
     <Menu
@@ -105,7 +116,11 @@ export function AppLayout() {
         <Header className={styles.header} style={{ background: token.colorBgContainer }}>
           <Space>
             {isMobile ? (
-              <Button icon={<MenuOutlined />} onClick={() => setMobileNavOpen(true)} />
+              <Button
+                aria-label="打开导航"
+                icon={<MenuOutlined />}
+                onClick={() => setMobileNavOpen(true)}
+              />
             ) : null}
             <Typography.Text strong>
               {selected === "kb" ? i18n.nav.knowledgeBases : i18n.nav.chat}

@@ -52,12 +52,12 @@ export const kbNameField = z
   .transform((v) => v.trim())
   .refine((v) => {
     const len = unicodeLength(v);
-    return len >= 1 && len <= 100;
-  }, "名称须为 1～100 字");
+    return len >= 1 && len <= 16;
+  }, "名称须为 1～16 字");
 
 export const kbDescriptionField = z
   .string()
-  .max(1000, "描述最长 1000 字")
+  .refine((v) => unicodeLength(v) <= 100, "描述最长 100 字")
   .optional()
   .or(z.literal(""));
 
@@ -66,8 +66,8 @@ export const docTitleField = z
   .transform((v) => v.trim())
   .refine((v) => {
     const len = unicodeLength(v);
-    return len >= 1 && len <= 200;
-  }, "标题须为 1～200 字");
+    return len >= 1 && len <= 100;
+  }, "标题须为 1～100 字");
 
 export const docSummaryField = z
   .string()
@@ -77,9 +77,19 @@ export const docSummaryField = z
 
 export const docContentField = z.string().refine((v) => {
   if (v.trim().length === 0) return false;
-  return unicodeLength(v) <= 100_000;
-}, "正文须为 1～100000 字");
+  return unicodeLength(v) <= 50_000;
+}, "正文须为 1～50000 字");
 
 export function assertTrimmedTitle(value: string, max: number): boolean {
   return trimmedUnicodeLength(value) >= 1 && trimmedUnicodeLength(value) <= max;
+}
+
+/** 将同一 Zod 规则接入 Ant Form，错误定位到字段而不是仅弹 toast。 */
+export function zodFormRule(schema: z.ZodType) {
+  return {
+    validator: async (_rule: unknown, value: unknown) => {
+      const result = schema.safeParse(value);
+      if (!result.success) throw new Error(result.error.issues[0]?.message ?? "输入无效");
+    },
+  };
 }

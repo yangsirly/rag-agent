@@ -10,12 +10,13 @@ import { AppApiError } from "@/shared/api/errors";
  */
 export function useAuthBootstrap() {
   const setUser = useAuthStore((s) => s.setUser);
-  const setBootstrapped = useAuthStore((s) => s.setBootstrapped);
-  const bootstrapped = useAuthStore((s) => s.bootstrapped);
+  const setStatus = useAuthStore((s) => s.setStatus);
+  const status = useAuthStore((s) => s.status);
 
   const query = useQuery({
     queryKey: ["auth", "me"],
     queryFn: meApi,
+    enabled: status === "bootstrapping",
     retry: false,
     staleTime: 60_000,
   });
@@ -27,22 +28,19 @@ export function useAuthBootstrap() {
         email: query.data.email,
         role: query.data.role,
       });
-      setBootstrapped(true);
       return;
     }
     if (query.isError) {
       const err = query.error;
       if (err instanceof AppApiError && (err.isUnauthorized || err.statusCode === 401)) {
         setUser(null);
-      }
-      // 网络错误时也结束启动，交给页面展示重试；不把用户当已登录
-      setBootstrapped(true);
+      } else setStatus("error");
     }
-  }, [query.isSuccess, query.isError, query.data, query.error, setUser, setBootstrapped]);
+  }, [query.isSuccess, query.isError, query.data, query.error, setUser, setStatus]);
 
   return {
-    bootstrapped,
-    isLoading: !bootstrapped || query.isLoading,
+    status,
+    isLoading: status === "bootstrapping" || query.isFetching,
     error: query.isError ? query.error : null,
     refetch: query.refetch,
   };

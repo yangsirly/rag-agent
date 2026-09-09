@@ -7,6 +7,8 @@ import {
   conversationTitleField,
   kbNameField,
   docTitleField,
+  docContentField,
+  kbDescriptionField,
 } from "./validation";
 
 describe("validation fields", () => {
@@ -38,4 +40,13 @@ describe("validation fields", () => {
     expect(kbNameField.parse(" product ")).toBe("product");
     expect(docTitleField.parse(" doc ")).toBe("doc");
   });
+});
+
+it("matches current backend KB and document limits by code point", () => {
+  expect(kbNameField.safeParse("😀".repeat(16)).success).toBe(true);
+  expect(kbNameField.safeParse("a".repeat(17)).success).toBe(false);
+  expect(kbDescriptionField.safeParse("😀".repeat(100)).success).toBe(true);
+  expect(kbDescriptionField.safeParse("a".repeat(101)).success).toBe(false);
+  expect(docTitleField.safeParse("a".repeat(101)).success).toBe(false);
+  expect(docContentField.safeParse("a".repeat(50001)).success).toBe(false);
 });

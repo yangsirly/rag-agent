@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Grid, Typography } from "antd";
+import { Grid, Typography, App } from "antd";
 import { ConversationSidebar } from "@/features/chat/components/ConversationSidebar";
 import { MessageList, type LocalBubble } from "@/features/chat/components/MessageList";
 import { Composer } from "@/features/chat/components/Composer";
@@ -8,7 +8,8 @@ import { useMessages, useSendMessage } from "@/features/chat/hooks/useMessages";
 import { createClientMessageId } from "@/shared/lib/id";
 import { PageState } from "@/shared/ui/PageState";
 import { t } from "@/shared/i18n";
-import { AppApiError } from "@/shared/api/errors";
+import { useRetryAfter } from "@/shared/hooks/useRetryAfter";
+import { getUserFacingError } from "@/shared/api/errors";
 import styles from "./chat.module.css";
 
 /**
@@ -18,6 +19,7 @@ import styles from "./chat.module.css";
  */
 export function ChatPage() {
   const i18n = t();
+  const { message } = App.useApp();
   const { conversationId } = useParams();
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
@@ -25,49 +27,58 @@ export function ChatPage() {
   const sendMut = useSendMessage(conversationId);
 
   // 按会话隔离本地发送态，切换会话时自动隔离，无需 effect 重置
-  const [pendingMap, setPendingMap] = useState<Record<string, LocalBubble | null>>({});
-  const pending = conversationId ? (pendingMap[conversationId] ?? null) : null;
-
-  const setPendingFor = (bubble: LocalBubble | null) => {
-    if (!conversationId) return;
-    setPendingMap((prev) => ({ ...prev, [conversationId]: bubble }));
-  };
-
+  const [pendingMap, setPendingMap] = useState<Record<string, LocalBubble[]>>({});
+  const pending = conversationId ? (pendingMap[conversationId] ?? []) : [];
+  const activeSends = useRef(new Set<string>());
+  const cooldown = useRetryAfter();
+  const sending = pending.some((bubble) => bubble.status === "sending");
   const messages = messagesQuery.data?.messages ?? [];
 
   const errorText = useMemo(() => {
     if (!messagesQuery.isError) return null;
-    const err = messagesQuery.error;
-    if (err instanceof AppApiError) return err.message;
-    return i18n.common.unknownError;
-  }, [messagesQuery.isError, messagesQuery.error, i18n.common.unknownError]);
+    return getUserFacingError(messagesQuery.error);
+  }, [messagesQuery.isError, messagesQuery.error]);
 
   const doSend = async (clientMessageId: string, content: string) => {
-    if (!conversationId) return;
-    setPendingFor({
-      key: `pending-${clientMessageId}`,
+    if (!conversationId || activeSends.current.has(conversationId) || cooldown.seconds) return;
+    const target = conversationId;
+    activeSends.current.add(target);
+    const bubble: LocalBubble = {
+      key: "pending-" + clientMessageId,
+      clientMessageId,
       role: "USER",
       content,
       status: "sending",
-      onRetry: () => void doSend(clientMessageId, content),
-    });
+    };
+    const update = (next: LocalBubble | null) =>
+      setPendingMap((previous) => {
+        const items = previous[target] ?? [];
+        const exists = items.some((item) => item.key === bubble.key);
+        return {
+          ...previous,
+          [target]: next
+            ? exists
+              ? items.map((item) => (item.key === bubble.key ? next : item))
+              : [...items, next]
+            : items.filter((item) => item.key !== bubble.key),
+        };
+      });
+    update(bubble);
     try {
       await sendMut.mutateAsync({ clientMessageId, content });
-      setPendingFor(null);
-    } catch {
-      setPendingFor({
-        key: `pending-${clientMessageId}`,
-        role: "USER",
-        content,
-        status: "failed",
-        onRetry: () => void doSend(clientMessageId, content),
-      });
+      update(null);
+    } catch (error) {
+      cooldown.start(error);
+      message.error(getUserFacingError(error));
+      update({ ...bubble, status: "failed", error: getUserFacingError(error) });
+    } finally {
+      activeSends.current.delete(target);
     }
   };
 
   const onSend = (content: string) => {
     // 新消息：生成新 ID。若上一笔仍在发送中则忽略
-    if (pending?.status === "sending") return;
+    if (sending) return;
     const id = createClientMessageId();
     void doSend(id, content);
   };
@@ -82,7 +93,9 @@ export function ChatPage() {
       <section className={styles.mainPane}>
         {!conversationId ? (
           <div className={styles.placeholder}>
-            {isMobile ? <ConversationSidebar /> : (
+            {isMobile ? (
+              <ConversationSidebar />
+            ) : (
               <Typography.Text type="secondary">{i18n.chat.emptyMessages}</Typography.Text>
             )}
           </div>
@@ -95,15 +108,20 @@ export function ChatPage() {
             >
               <MessageList
                 messages={messages}
-                pending={pending}
+                pending={pending.map((bubble) => ({
+                  ...bubble,
+                  onRetry: () => void doSend(bubble.clientMessageId!, bubble.content),
+                }))}
+                retryDisabled={sending || cooldown.seconds > 0}
                 hasOlder={messagesQuery.data?.hasOlder}
                 loadingOlder={messagesQuery.isFetchingNextPage}
                 onLoadOlder={() => void messagesQuery.fetchNextPage()}
               />
             </PageState>
             <Composer
-              disabled={!conversationId || pending?.status === "sending"}
-              sending={pending?.status === "sending"}
+              disabled={!conversationId || sending}
+              sending={sending}
+              cooldown={cooldown.seconds}
               onSend={onSend}
             />
           </>

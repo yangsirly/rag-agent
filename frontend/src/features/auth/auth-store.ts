@@ -10,9 +10,9 @@ export type AuthUser = {
 type AuthState = {
   /** null = 未登录；bootstrap 完成前不要用此字段做路由闪烁决策 */
   user: AuthUser | null;
-  bootstrapped: boolean;
+  status: "bootstrapping" | "authenticated" | "anonymous" | "error";
+  setStatus: (status: AuthState["status"]) => void;
   setUser: (user: AuthUser | null) => void;
-  setBootstrapped: (value: boolean) => void;
   clear: () => void;
 };
 
@@ -22,10 +22,10 @@ type AuthState = {
  */
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  bootstrapped: false,
-  setUser: (user) => set({ user }),
-  setBootstrapped: (bootstrapped) => set({ bootstrapped }),
-  clear: () => set({ user: null }),
+  status: "bootstrapping",
+  setStatus: (status) => set({ status }),
+  setUser: (user) => set({ user, status: user ? "authenticated" : "anonymous" }),
+  clear: () => set({ user: null, status: "anonymous" }),
 }));
 
 export function isEditor(role: Role | undefined | null): boolean {

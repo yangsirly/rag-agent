@@ -99,7 +99,7 @@ SPA 有页面路由 `/login`，后端也有 `POST /login`。若前端与后端�
 前端一律请求 `/api/*`：
 
 - Vite dev：`/api/login` → 代理改写为后端 `/login`
-- Nginx：`location /api/` → `proxy_pass http://backend:8080/`（注意尾部 `/` 会去掉 `/api` 前缀）
+- Nginx：`location /api/` → `proxy_pass http://backend:18080/`（注意尾部 `/` 会去掉 `/api` 前缀）
 
 ### 对应配置
 

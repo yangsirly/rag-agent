@@ -1,9 +1,5 @@
 import { delay, HttpResponse } from "msw";
-import {
-  getStore,
-  parseCookieToken,
-  userFromToken,
-} from "@/mocks/data/store";
+import { getStore, parseCookieToken, userFromToken } from "@/mocks/data/store";
 import { appEnv } from "@/shared/lib/env";
 
 export function json(
@@ -90,5 +86,4 @@ export function canSeeKb(userId: string, kbId: string): "ok" | "not_found" {
   return "not_found";
 }
 
-export const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

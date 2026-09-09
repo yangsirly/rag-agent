@@ -5,6 +5,8 @@ import styles from "../pages/chat.module.css";
 
 export type LocalBubble = {
   key: string;
+  clientMessageId?: string;
+  error?: string;
   role: "USER" | "ASSISTANT";
   content: string;
   status?: "sending" | "failed" | "done";
@@ -13,7 +15,8 @@ export type LocalBubble = {
 
 type Props = {
   messages: Message[];
-  pending?: LocalBubble | null;
+  pending?: LocalBubble[];
+  retryDisabled?: boolean;
   hasOlder?: boolean;
   loadingOlder?: boolean;
   onLoadOlder?: () => void;
@@ -22,6 +25,7 @@ type Props = {
 export function MessageList({
   messages,
   pending,
+  retryDisabled,
   hasOlder,
   loadingOlder,
   onLoadOlder,
@@ -33,7 +37,13 @@ export function MessageList({
     content: m.content,
     status: "done",
   }));
-  if (pending) bubbles.push(pending);
+  if (pending)
+    bubbles.push(
+      ...pending.filter(
+        (bubble) =>
+          !messages.some((m) => m.role === "USER" && m.clientMessageId === bubble.clientMessageId),
+      ),
+    );
 
   return (
     <div className={styles.messageList}>
@@ -64,9 +74,10 @@ export function MessageList({
               {b.status === "failed" ? <Tag color="error">{i18n.chat.sendFailed}</Tag> : null}
             </div>
             <div className={styles.bubbleContent}>{b.content}</div>
+            {b.error ? <Typography.Text type="danger">{b.error}</Typography.Text> : null}
             {b.status === "failed" && b.onRetry ? (
               <Space style={{ marginTop: 8 }}>
-                <Button size="small" type="primary" onClick={b.onRetry}>
+                <Button size="small" type="primary" onClick={b.onRetry} disabled={retryDisabled}>
                   {i18n.common.retry}
                 </Button>
               </Space>

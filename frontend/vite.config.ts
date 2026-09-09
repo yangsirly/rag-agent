@@ -5,7 +5,7 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const apiTarget = env.VITE_API_PROXY_TARGET || "http://localhost:8080";
+  const apiTarget = env.VITE_API_PROXY_TARGET || "http://localhost:18080";
 
   return {
     plugins: [react()],
@@ -43,7 +43,12 @@ export default defineConfig(({ mode }) => {
       coverage: {
         provider: "v8",
         reporter: ["text", "html", "lcov"],
-        include: ["src/shared/lib/**/*.{ts,tsx}", "src/shared/api/**/*.{ts,tsx}", "src/features/**/api.ts", "src/features/auth/auth-store.ts"],
+        include: [
+          "src/shared/lib/**/*.{ts,tsx}",
+          "src/shared/api/**/*.{ts,tsx}",
+          "src/features/**/api.ts",
+          "src/features/auth/auth-store.ts",
+        ],
         exclude: [
           "src/main.tsx",
           "src/mocks/**",

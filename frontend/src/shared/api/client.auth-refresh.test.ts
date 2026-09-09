@@ -1,7 +1,7 @@
-import { http } from "msw";
+import { http, HttpResponse } from "msw";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { mockServer } from "@/mocks/server";
-import { apiClient, setUnauthorizedHandler } from "./client";
+import { apiClient, beginAuthTransition, setUnauthorizedHandler } from "./client";
 import { err, json } from "@/mocks/handlers/utils";
 
 describe("api client access-token recovery", () => {
@@ -53,4 +53,26 @@ describe("api client access-token recovery", () => {
     expect(results.every((result) => result.status === "rejected")).toBe(true);
     expect(unauthorized).toHaveBeenCalledTimes(1);
   });
+});
+
+it.each([500, 503, 0])("refresh failure %s preserves authentication", async (status) => {
+  beginAuthTransition();
+  const unauthorized = vi.fn();
+  setUnauthorizedHandler(unauthorized);
+  mockServer.use(
+    http.get("/api/protected", () => err(401, "UNAUTHORIZED", "expired")),
+    http.post("/api/refresh", () =>
+      status ? err(status, "SERVER_ERROR", "unavailable") : HttpResponse.error(),
+    ),
+  );
+  await expect(apiClient.get("/protected")).rejects.toMatchObject({ statusCode: status });
+  expect(unauthorized).not.toHaveBeenCalled();
+  setUnauthorizedHandler(null);
+});
+
+it("does not retry a network GET in Axios", async () => {
+  const handler = vi.fn(() => HttpResponse.error());
+  mockServer.use(http.get("/api/protected", handler));
+  await expect(apiClient.get("/protected")).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+  expect(handler).toHaveBeenCalledTimes(1);
 });

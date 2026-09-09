@@ -96,10 +96,7 @@ export const authHandlers = [
     const token = getToken(request, cookies);
     clearSession(token);
     clearSession(getRefreshToken(request, cookies));
-    return json(
-      { statusCode: 200 },
-      { status: 200, headers: clearCookieHeaders() },
-    );
+    return json({ statusCode: 200 }, { status: 200, headers: clearCookieHeaders() });
   }),
 
   http.get("/api/me", async ({ request, cookies }) => {

@@ -15,7 +15,11 @@ export function createAppQueryClient() {
             if (error.statusCode >= 400 && error.statusCode < 500) return false;
             if (error.isNetwork) return failureCount < 2;
           }
-          return failureCount < 1;
+          return (
+            error instanceof AppApiError &&
+            [500, 502, 503, 504].includes(error.statusCode) &&
+            failureCount < 1
+          );
         },
         refetchOnWindowFocus: false,
       },

@@ -1,4 +1,4 @@
-import { Button, Descriptions, Drawer, Select, Space, Table, Tag, Typography, message } from "antd";
+import { App, Button, Descriptions, Drawer, Select, Space, Table, Tag, Typography } from "antd";
 import { useEffect, useState } from "react";
 import {
   clearDiagnostics,
@@ -17,6 +17,7 @@ import { t } from "@/shared/i18n";
  */
 export function DiagnosticsDrawer() {
   const i18n = t();
+  const { message } = App.useApp();
   const open = useUiStore((s) => s.diagnosticsOpen);
   const setOpen = useUiStore((s) => s.setDiagnosticsOpen);
   const user = useAuthStore((s) => s.user);
@@ -55,12 +56,7 @@ export function DiagnosticsDrawer() {
   };
 
   return (
-    <Drawer
-      title={i18n.diagnostics.title}
-      open={open}
-      onClose={() => setOpen(false)}
-      width={560}
-    >
+    <Drawer title={i18n.diagnostics.title} open={open} onClose={() => setOpen(false)} width={560}>
       <Descriptions column={1} size="small" bordered style={{ marginBottom: 16 }}>
         <Descriptions.Item label={i18n.diagnostics.apiMode}>
           <Tag color={appEnv.apiMode === "mock" ? "purple" : "blue"}>{appEnv.apiMode}</Tag>

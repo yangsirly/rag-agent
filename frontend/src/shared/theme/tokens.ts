@@ -37,6 +37,8 @@ export const lightTheme: ThemeConfig = {
     colorBgLayout: "#F4F6FB",
     colorBgContainer: "#FFFFFF",
     colorText: "#0F172A",
+    colorTextSecondary: "#595959",
+    colorTextDescription: "#595959",
   },
 };
 
@@ -48,6 +50,8 @@ export const darkTheme: ThemeConfig = {
     colorBgLayout: "#0B1020",
     colorBgContainer: "#121A2B",
     colorText: "#E5E7EB",
+    colorTextSecondary: "#B8C0D0",
+    colorTextDescription: "#B8C0D0",
     colorPrimary: "#818CF8",
   },
 };

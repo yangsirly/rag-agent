@@ -18,7 +18,10 @@ export async function listKnowledgeBases(page = 0, size = 20) {
   );
 }
 
-export async function createKnowledgeBase(name: string, description?: string): Promise<KnowledgeBase> {
+export async function createKnowledgeBase(
+  name: string,
+  description?: string,
+): Promise<KnowledgeBase> {
   return requestAndParse(
     {
       method: "POST",

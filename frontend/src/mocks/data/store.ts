@@ -60,15 +60,7 @@ export type MockMember = {
 };
 
 export type MockFault =
-  | "none"
-  | "delay"
-  | "timeout"
-  | "400"
-  | "401"
-  | "403"
-  | "404"
-  | "409"
-  | "500";
+  "none" | "delay" | "timeout" | "400" | "401" | "403" | "404" | "409" | "500";
 
 export type MockSession = {
   userId: string;
@@ -93,8 +85,7 @@ export type MockStore = {
   fault: MockFault;
 };
 
-export const TEMPLATE_REPLY =
-  "已收到你的问题。本系统当前处于第一阶段，暂未接入真实模型。";
+export const TEMPLATE_REPLY = "已收到你的问题。本系统当前处于第一阶段，暂未接入真实模型。";
 
 const SESSION_STORAGE_KEY = "rag-agent-mock-sessions";
 
@@ -248,7 +239,8 @@ export function createSession(userId: string): string {
 export function clearSession(token: string | null) {
   if (!token) return;
   const parsedRefresh = refreshSnapshot(token);
-  const session = findSession(token) ?? (parsedRefresh ? store.sessions[parsedRefresh.sessionId] : undefined);
+  const session =
+    findSession(token) ?? (parsedRefresh ? store.sessions[parsedRefresh.sessionId] : undefined);
   if (session) {
     session.revoked = true;
     persistSessions();
@@ -338,7 +330,10 @@ export function rotateSession(refreshToken: string | null) {
   return { ...session };
 }
 
-export function parseCookieToken(cookieHeader: string | null, name = "access_token"): string | null {
+export function parseCookieToken(
+  cookieHeader: string | null,
+  name = "access_token",
+): string | null {
   if (!cookieHeader) return null;
   const parts = cookieHeader.split(";").map((p) => p.trim());
   for (const p of parts) {
@@ -349,10 +344,21 @@ export function parseCookieToken(cookieHeader: string | null, name = "access_tok
   return null;
 }
 
-export function cookieHeaders(accessToken: string, refreshToken: string, accessMaxAge = 900, refreshMaxAge = 604800): Headers {
+export function cookieHeaders(
+  accessToken: string,
+  refreshToken: string,
+  accessMaxAge = 900,
+  refreshMaxAge = 604800,
+): Headers {
   const headers = new Headers();
-  headers.append("Set-Cookie", `access_token=${encodeURIComponent(accessToken)}; Path=/; SameSite=Lax; HttpOnly; Max-Age=${accessMaxAge}`);
-  headers.append("Set-Cookie", `refresh_token=${encodeURIComponent(refreshToken)}; Path=/; SameSite=Lax; HttpOnly; Max-Age=${refreshMaxAge}`);
+  headers.append(
+    "Set-Cookie",
+    `access_token=${encodeURIComponent(accessToken)}; Path=/; SameSite=Lax; HttpOnly; Max-Age=${accessMaxAge}`,
+  );
+  headers.append(
+    "Set-Cookie",
+    `refresh_token=${encodeURIComponent(refreshToken)}; Path=/; SameSite=Lax; HttpOnly; Max-Age=${refreshMaxAge}`,
+  );
   return headers;
 }
 
@@ -363,7 +369,9 @@ function encodeUserSnapshot(snapshot: { userId: string; email: string; role: Moc
     .replaceAll(".", "%2E");
 }
 
-function decodeUserSnapshot(encoded: string): { userId: string; email: string; role: MockRole } | null {
+function decodeUserSnapshot(
+  encoded: string,
+): { userId: string; email: string; role: MockRole } | null {
   try {
     const [userId, email, role] = decodeURIComponent(encoded).split("|");
     if (!userId || !email || (role !== "CUSTOMER" && role !== "EDITOR")) return null;

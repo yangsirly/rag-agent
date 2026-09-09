@@ -12,10 +12,7 @@ import {
   sanitizeForDiagnostics,
   updateDiagnostics,
 } from "./diagnostics-log";
-import {
-  ContractValidationError,
-  toAppApiError,
-} from "./errors";
+import { ContractValidationError, toAppApiError } from "./errors";
 
 export type UnauthorizedHandler = () => void;
 
@@ -47,7 +44,6 @@ function notifyUnauthorized() {
 }
 
 type RetryConfig = InternalAxiosRequestConfig & {
-  __retryCount?: number;
   __diagId?: string;
   __startedAt?: number;
   __authRetry?: boolean;
@@ -103,7 +99,7 @@ async function refreshAccessToken(): Promise<void> {
   return refreshInFlight!;
 }
 
-apiClient.interceptors.request.use((config: RetryConfig) => {
+const recordRequest = (config: RetryConfig) => {
   config.__authEpoch = authEpoch;
   const requestId = createClientRequestId();
   config.headers.set("X-Client-Request-Id", requestId);
@@ -124,7 +120,29 @@ apiClient.interceptors.request.use((config: RetryConfig) => {
     }),
   });
   return config;
-});
+};
+apiClient.interceptors.request.use(recordRequest);
+refreshClient.interceptors.request.use(recordRequest);
+refreshClient.interceptors.response.use(
+  (response) => {
+    const cfg = response.config as RetryConfig;
+    if (cfg.__diagId)
+      updateDiagnostics(cfg.__diagId, {
+        status: response.status,
+        durationMs: Date.now() - (cfg.__startedAt ?? Date.now()),
+      });
+    return response;
+  },
+  (error: AxiosError) => {
+    const cfg = error.config as RetryConfig | undefined;
+    if (cfg?.__diagId)
+      updateDiagnostics(cfg.__diagId, {
+        status: error.response?.status ?? "network",
+        durationMs: Date.now() - (cfg.__startedAt ?? Date.now()),
+      });
+    return Promise.reject(error);
+  },
+);
 
 apiClient.interceptors.response.use(
   (response) => {
@@ -140,16 +158,6 @@ apiClient.interceptors.response.use(
   },
   async (error: AxiosError) => {
     const cfg = (error.config ?? {}) as RetryConfig;
-    const method = (cfg.method ?? "get").toUpperCase();
-    const isGet = method === "GET";
-    const retryCount = cfg.__retryCount ?? 0;
-    const noResponse = !error.response;
-
-    // GET 网络错误最多重试 2 次；业务 4xx 与写请求不自动重试
-    if (isGet && noResponse && retryCount < 2) {
-      cfg.__retryCount = retryCount + 1;
-      return apiClient.request(cfg);
-    }
 
     if (cfg.__diagId) {
       const status = error.response?.status ?? "network";
@@ -178,12 +186,13 @@ apiClient.interceptors.response.use(
         if (cfg.__authEpoch !== authEpoch) return Promise.reject(appError);
         cfg.__authRetry = true;
         return apiClient.request(cfg);
-      } catch {
-        // Refresh 失败后继续走统一清理/跳转逻辑，不泄露失败细节。
-        if (cfg.__authEpoch === authEpoch) {
+      } catch (error) {
+        // 续期网络故障不等于会话失效，保留身份并传递实际故障。
+        const refreshError = toAppApiError(error);
+        if (refreshError.statusCode === 401 && cfg.__authEpoch === authEpoch) {
           notifyUnauthorized();
         }
-        return Promise.reject(appError);
+        return Promise.reject(refreshError);
       }
     }
 
@@ -202,21 +211,16 @@ export async function requestAndParse<T>(
   const response = await apiClient.request(config);
   const result = schema.safeParse(response.data);
   if (!result.success) {
-    const issues = result.error.issues.map(
-      (i) => `${i.path.join(".") || "(root)"}: ${i.message}`,
-    );
+    const issues = result.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`);
     const path = `${config.baseURL ?? "/api"}${config.url ?? ""}`;
     const method = (config.method ?? "get").toUpperCase();
-    pushDiagnostics({
-      id: createClientRequestId(),
-      at: new Date().toISOString(),
-      method,
-      path,
-      status: "contract",
-      requestId: String(response.headers["x-client-request-id"] ?? ""),
-      note: issues.join("; "),
-      summary: sanitizeForDiagnostics(response.data),
-    });
+    const cfg = response.config as RetryConfig;
+    if (cfg.__diagId)
+      updateDiagnostics(cfg.__diagId, {
+        status: "contract",
+        note: issues.join("; "),
+        summary: sanitizeForDiagnostics(response.data),
+      });
     throw new ContractValidationError(path, method, issues);
   }
   return result.data;

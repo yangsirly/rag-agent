@@ -1,7 +1,9 @@
-import { Button, Input, List, Modal, Typography, message } from "antd";
+import { getUserFacingError } from "@/shared/api/errors";
+import { conversationTitleField } from "@/shared/lib/validation";
+import { Button, Input, List, Modal, Typography, App } from "antd";
 import { EditOutlined, PlusOutlined } from "@ant-design/icons";
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type { Conversation } from "@/shared/api/schemas";
 import { ConfirmDeleteButton } from "@/shared/ui/ConfirmDeleteButton";
 import { PageState } from "@/shared/ui/PageState";
@@ -21,6 +23,7 @@ type Props = {
 
 export function ConversationSidebar({ activeId, onNavigate }: Props) {
   const i18n = t();
+  const { message } = App.useApp();
   const navigate = useNavigate();
   const listQuery = useConversations();
   const createMut = useCreateConversation();
@@ -39,20 +42,28 @@ export function ConversationSidebar({ activeId, onNavigate }: Props) {
   }, [listQuery.data]);
 
   const onCreate = async () => {
-    const created = await createMut.mutateAsync(undefined);
-    navigate(`/chat/${created.id}`);
-    onNavigate?.();
+    try {
+      const created = await createMut.mutateAsync(undefined);
+      navigate(`/chat/${created.id}`);
+      onNavigate?.();
+    } catch (error) {
+      message.error(getUserFacingError(error));
+    }
   };
 
   const onConfirmRename = async () => {
     if (!renameTarget) return;
-    const title = renameValue.trim();
-    if (!title || title.length > 100) {
+    const parsed = conversationTitleField.safeParse(renameValue);
+    if (!parsed.success) {
       message.error(i18n.chat.titleLength);
       return;
     }
-    await renameMut.mutateAsync({ id: renameTarget.id, title });
-    setRenameTarget(null);
+    try {
+      await renameMut.mutateAsync({ id: renameTarget.id, title: parsed.data });
+      setRenameTarget(null);
+    } catch (error) {
+      message.error(getUserFacingError(error));
+    }
   };
 
   return (
@@ -70,7 +81,7 @@ export function ConversationSidebar({ activeId, onNavigate }: Props) {
       </div>
       <PageState
         loading={listQuery.isLoading}
-        error={listQuery.isError ? i18n.common.unknownError : null}
+        error={listQuery.isError ? getUserFacingError(listQuery.error) : null}
         onRetry={() => void listQuery.refetch()}
         empty={!listQuery.isLoading && items.length === 0}
         emptyDescription={i18n.chat.emptyConversations}
@@ -81,13 +92,10 @@ export function ConversationSidebar({ activeId, onNavigate }: Props) {
           renderItem={(item) => (
             <List.Item
               className={`${styles.conversationItem} ${item.id === activeId ? styles.active : ""}`}
-              onClick={() => {
-                navigate(`/chat/${item.id}`);
-                onNavigate?.();
-              }}
               actions={[
                 <Button
                   key="edit"
+                  aria-label={"编辑「" + item.title + "」"}
                   size="small"
                   type="text"
                   icon={<EditOutlined />}
@@ -100,17 +108,26 @@ export function ConversationSidebar({ activeId, onNavigate }: Props) {
                 <span key="del" onClick={(e) => e.stopPropagation()}>
                   <ConfirmDeleteButton
                     title={i18n.chat.deleteConfirm}
+                    ariaLabel={"删除「" + item.title + "」"}
                     loading={deleteMut.isPending}
                     onConfirm={async () => {
-                      await deleteMut.mutateAsync(item.id);
-                      if (activeId === item.id) navigate("/chat");
+                      try {
+                        await deleteMut.mutateAsync(item.id);
+                        if (activeId === item.id) navigate("/chat");
+                      } catch (error) {
+                        message.error(getUserFacingError(error));
+                      }
                     }}
                   />
                 </span>,
               ]}
             >
               <List.Item.Meta
-                title={item.title}
+                title={
+                  <Link to={"/chat/" + item.id} onClick={onNavigate}>
+                    {item.title}
+                  </Link>
+                }
                 description={new Date(item.updatedAt).toLocaleString()}
               />
             </List.Item>
@@ -118,7 +135,10 @@ export function ConversationSidebar({ activeId, onNavigate }: Props) {
         />
         {listQuery.hasNextPage ? (
           <div className={styles.loadMore}>
-            <Button onClick={() => void listQuery.fetchNextPage()} loading={listQuery.isFetchingNextPage}>
+            <Button
+              onClick={() => void listQuery.fetchNextPage()}
+              loading={listQuery.isFetchingNextPage}
+            >
               加载更多会话
             </Button>
           </div>
@@ -137,7 +157,7 @@ export function ConversationSidebar({ activeId, onNavigate }: Props) {
         <Input
           value={renameValue}
           onChange={(e) => setRenameValue(e.target.value)}
-          maxLength={100}
+          aria-label="会话标题"
           showCount
         />
       </Modal>

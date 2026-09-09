@@ -8,6 +8,7 @@ type Props = {
   loading?: boolean;
   danger?: boolean;
   label?: string;
+  ariaLabel?: string;
   size?: "small" | "middle" | "large";
 };
 
@@ -16,12 +17,18 @@ export function ConfirmDeleteButton({
   onConfirm,
   loading,
   label,
+  ariaLabel,
   size = "small",
 }: Props) {
   const i18n = t();
   return (
-    <Popconfirm title={title} onConfirm={onConfirm} okText={i18n.common.confirm} cancelText={i18n.common.cancel}>
-      <Button danger size={size} icon={<DeleteOutlined />} loading={loading}>
+    <Popconfirm
+      title={title}
+      onConfirm={onConfirm}
+      okText={i18n.common.confirm}
+      cancelText={i18n.common.cancel}
+    >
+      <Button aria-label={ariaLabel} danger size={size} icon={<DeleteOutlined />} loading={loading}>
         {label ?? i18n.common.delete}
       </Button>
     </Popconfirm>

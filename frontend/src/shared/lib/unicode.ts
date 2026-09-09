@@ -7,11 +7,7 @@ export function unicodeLength(value: string): number {
   return [...value].length;
 }
 
-export function isWithinUnicodeLength(
-  value: string,
-  min: number,
-  max: number,
-): boolean {
+export function isWithinUnicodeLength(value: string, min: number, max: number): boolean {
   const len = unicodeLength(value);
   return len >= min && len <= max;
 }

@@ -11,14 +11,7 @@ type Props = {
   children?: ReactNode;
 };
 
-export function PageState({
-  loading,
-  error,
-  empty,
-  emptyDescription,
-  onRetry,
-  children,
-}: Props) {
+export function PageState({ loading, error, empty, emptyDescription, onRetry, children }: Props) {
   const i18n = t();
   if (loading) {
     return (

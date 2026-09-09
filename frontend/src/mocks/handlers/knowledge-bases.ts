@@ -46,7 +46,7 @@ export const knowledgeBaseHandlers = [
     if (user.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问知识库");
     const body = (await request.json()) as { name?: string; description?: string | null };
     const name = body.name?.trim() ?? "";
-    if (!name || unicodeLength(name) > 100) {
+    if (!name || unicodeLength(name) > 16) {
       return err(400, "INVALID_KNOWLEDGE_BASE_REQUEST", "名称非法");
     }
     const store = getStore();
@@ -95,7 +95,7 @@ export const knowledgeBaseHandlers = [
     }
     if (body.name !== undefined) {
       const name = body.name.trim();
-      if (!name || unicodeLength(name) > 100) {
+      if (!name || unicodeLength(name) > 16) {
         return err(400, "INVALID_KNOWLEDGE_BASE_REQUEST", "名称非法");
       }
       kb.name = name;
@@ -161,10 +161,10 @@ export const knowledgeBaseHandlers = [
       content?: string;
     };
     const title = body.title?.trim() ?? "";
-    if (!title || unicodeLength(title) > 200) {
+    if (!title || unicodeLength(title) > 100) {
       return err(400, "INVALID_DOCUMENT_REQUEST", "标题非法");
     }
-    if (!body.content || body.content.trim().length === 0 || unicodeLength(body.content) > 100000) {
+    if (!body.content || body.content.trim().length === 0 || unicodeLength(body.content) > 50000) {
       return err(400, "INVALID_DOCUMENT_REQUEST", "正文非法");
     }
     if (body.summary && unicodeLength(body.summary) > 500) {
@@ -201,64 +201,70 @@ export const knowledgeBaseHandlers = [
     return json({ statusCode: 200, ...doc });
   }),
 
-  http.patch("/api/knowledge-bases/:kbId/documents/:docId", async ({ request, params, cookies }) => {
-    const fault = await applyFault();
-    if (fault) return fault;
-    const auth = requireUser(request, cookies);
-    if ("error" in auth && auth.error) return auth.error;
-    if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问知识库");
-    if (canSeeKb(auth.user!.id, String(params.kbId)) !== "ok") {
-      return err(404, "NOT_FOUND", "知识库不存在");
-    }
-    const doc = getStore().documents.find(
-      (d) => d.id === params.docId && d.knowledgeBaseId === params.kbId,
-    );
-    if (!doc) return err(404, "NOT_FOUND", "文档不存在");
-    const body = (await request.json()) as {
-      title?: string;
-      summary?: string | null;
-      content?: string;
-    };
-    if (body.title === undefined && body.summary === undefined && body.content === undefined) {
-      return err(400, "INVALID_DOCUMENT_REQUEST", "空更新");
-    }
-    if (body.title !== undefined) {
-      const title = body.title.trim();
-      if (!title || unicodeLength(title) > 200) {
-        return err(400, "INVALID_DOCUMENT_REQUEST", "标题非法");
+  http.patch(
+    "/api/knowledge-bases/:kbId/documents/:docId",
+    async ({ request, params, cookies }) => {
+      const fault = await applyFault();
+      if (fault) return fault;
+      const auth = requireUser(request, cookies);
+      if ("error" in auth && auth.error) return auth.error;
+      if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问知识库");
+      if (canSeeKb(auth.user!.id, String(params.kbId)) !== "ok") {
+        return err(404, "NOT_FOUND", "知识库不存在");
       }
-      doc.title = title;
-    }
-    if (body.content !== undefined) {
-      if (!body.content.trim() || unicodeLength(body.content) > 100000) {
-        return err(400, "INVALID_DOCUMENT_REQUEST", "正文非法");
+      const doc = getStore().documents.find(
+        (d) => d.id === params.docId && d.knowledgeBaseId === params.kbId,
+      );
+      if (!doc) return err(404, "NOT_FOUND", "文档不存在");
+      const body = (await request.json()) as {
+        title?: string;
+        summary?: string | null;
+        content?: string;
+      };
+      if (body.title === undefined && body.summary === undefined && body.content === undefined) {
+        return err(400, "INVALID_DOCUMENT_REQUEST", "空更新");
       }
-      doc.content = body.content;
-    }
-    if (body.summary !== undefined) {
-      doc.summary = body.summary?.trim() ? body.summary.trim() : null;
-    }
-    doc.updatedAt = now();
-    return json({ statusCode: 200, ...doc });
-  }),
+      if (body.title !== undefined) {
+        const title = body.title.trim();
+        if (!title || unicodeLength(title) > 100) {
+          return err(400, "INVALID_DOCUMENT_REQUEST", "标题非法");
+        }
+        doc.title = title;
+      }
+      if (body.content !== undefined) {
+        if (!body.content.trim() || unicodeLength(body.content) > 50000) {
+          return err(400, "INVALID_DOCUMENT_REQUEST", "正文非法");
+        }
+        doc.content = body.content;
+      }
+      if (body.summary !== undefined) {
+        doc.summary = body.summary?.trim() ? body.summary.trim() : null;
+      }
+      doc.updatedAt = now();
+      return json({ statusCode: 200, ...doc });
+    },
+  ),
 
-  http.delete("/api/knowledge-bases/:kbId/documents/:docId", async ({ request, params, cookies }) => {
-    const fault = await applyFault();
-    if (fault) return fault;
-    const auth = requireUser(request, cookies);
-    if ("error" in auth && auth.error) return auth.error;
-    if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问知识库");
-    if (canSeeKb(auth.user!.id, String(params.kbId)) !== "ok") {
-      return err(404, "NOT_FOUND", "知识库不存在");
-    }
-    const store = getStore();
-    const idx = store.documents.findIndex(
-      (d) => d.id === params.docId && d.knowledgeBaseId === params.kbId,
-    );
-    if (idx < 0) return err(404, "NOT_FOUND", "文档不存在");
-    store.documents.splice(idx, 1);
-    return new HttpResponse(null, { status: 204 });
-  }),
+  http.delete(
+    "/api/knowledge-bases/:kbId/documents/:docId",
+    async ({ request, params, cookies }) => {
+      const fault = await applyFault();
+      if (fault) return fault;
+      const auth = requireUser(request, cookies);
+      if ("error" in auth && auth.error) return auth.error;
+      if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问知识库");
+      if (canSeeKb(auth.user!.id, String(params.kbId)) !== "ok") {
+        return err(404, "NOT_FOUND", "知识库不存在");
+      }
+      const store = getStore();
+      const idx = store.documents.findIndex(
+        (d) => d.id === params.docId && d.knowledgeBaseId === params.kbId,
+      );
+      if (idx < 0) return err(404, "NOT_FOUND", "文档不存在");
+      store.documents.splice(idx, 1);
+      return new HttpResponse(null, { status: 204 });
+    },
+  ),
 
   http.get("/api/knowledge-bases/:id/members", async ({ request, params, cookies }) => {
     const fault = await applyFault();
@@ -325,26 +331,29 @@ export const knowledgeBaseHandlers = [
     return json({ statusCode: 201, ...member }, { status: 201 });
   }),
 
-  http.delete("/api/knowledge-bases/:kbId/members/:userId", async ({ request, params, cookies }) => {
-    const fault = await applyFault();
-    if (fault) return fault;
-    const auth = requireUser(request, cookies);
-    if ("error" in auth && auth.error) return auth.error;
-    if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问");
-    const kb = getStore().knowledgeBases.find((k) => k.id === params.kbId);
-    if (!kb) return err(404, "NOT_FOUND", "知识库不存在");
-    if (kb.creatorId !== auth.user!.id) {
-      if (canSeeKb(auth.user!.id, kb.id) === "ok") {
-        return err(403, "FORBIDDEN", "仅创建者可取消授权");
+  http.delete(
+    "/api/knowledge-bases/:kbId/members/:userId",
+    async ({ request, params, cookies }) => {
+      const fault = await applyFault();
+      if (fault) return fault;
+      const auth = requireUser(request, cookies);
+      if ("error" in auth && auth.error) return auth.error;
+      if (auth.user!.role !== "EDITOR") return err(403, "FORBIDDEN", "无权访问");
+      const kb = getStore().knowledgeBases.find((k) => k.id === params.kbId);
+      if (!kb) return err(404, "NOT_FOUND", "知识库不存在");
+      if (kb.creatorId !== auth.user!.id) {
+        if (canSeeKb(auth.user!.id, kb.id) === "ok") {
+          return err(403, "FORBIDDEN", "仅创建者可取消授权");
+        }
+        return err(404, "NOT_FOUND", "知识库不存在");
       }
-      return err(404, "NOT_FOUND", "知识库不存在");
-    }
-    const store = getStore();
-    const idx = store.members.findIndex(
-      (m) => m.knowledgeBaseId === kb.id && m.userId === params.userId,
-    );
-    if (idx < 0) return err(404, "NOT_FOUND", "成员不存在");
-    store.members.splice(idx, 1);
-    return new HttpResponse(null, { status: 204 });
-  }),
+      const store = getStore();
+      const idx = store.members.findIndex(
+        (m) => m.knowledgeBaseId === kb.id && m.userId === params.userId,
+      );
+      if (idx < 0) return err(404, "NOT_FOUND", "成员不存在");
+      store.members.splice(idx, 1);
+      return new HttpResponse(null, { status: 204 });
+    },
+  ),
 ];

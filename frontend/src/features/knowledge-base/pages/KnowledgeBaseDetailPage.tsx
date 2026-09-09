@@ -1,15 +1,7 @@
-import {
-  Button,
-  Card,
-  Drawer,
-  Form,
-  Input,
-  List,
-  Modal,
-  Space,
-  Typography,
-  message,
-} from "antd";
+import { useAuthStore } from "@/features/auth/auth-store";
+import { getUserFacingError } from "@/shared/api/errors";
+import { unicodeLength } from "@/shared/lib/unicode";
+import { Button, Card, Drawer, Form, Input, List, Modal, Space, Typography, App } from "antd";
 import { PlusOutlined, TeamOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -26,11 +18,18 @@ import { appEnv } from "@/shared/lib/env";
 import { ConfirmDeleteButton } from "@/shared/ui/ConfirmDeleteButton";
 import { PageState } from "@/shared/ui/PageState";
 import { t } from "@/shared/i18n";
-import { docContentField, docSummaryField, docTitleField } from "@/shared/lib/validation";
+import {
+  docContentField,
+  docSummaryField,
+  docTitleField,
+  zodFormRule,
+} from "@/shared/lib/validation";
 import styles from "./kb.module.css";
 
 export function KnowledgeBaseDetailPage() {
   const i18n = t();
+  const { message } = App.useApp();
+  const user = useAuthStore((s) => s.user);
   const { id = "" } = useParams();
   const qc = useQueryClient();
   const [page, setPage] = useState(0);
@@ -58,6 +57,26 @@ export function KnowledgeBaseDetailPage() {
     enabled: Boolean(id && viewDocId && viewerOpen),
   });
 
+  // 用户主动请求编辑详情；Query 缓存负责资源，mutation 负责这次打开动作的加载/失败反馈。
+  const editLoad = useMutation({
+    mutationFn: (docId: string) =>
+      qc.fetchQuery({
+        queryKey: ["document", id, docId],
+        queryFn: () => getDocument(id, docId),
+        staleTime: 0,
+      }),
+    onSuccess: (full) => {
+      setEditingId(full.id);
+      form.setFieldsValue({
+        title: full.title,
+        summary: full.summary ?? "",
+        content: full.content,
+      });
+      setEditorOpen(true);
+    },
+    onError: (error) => message.error(getUserFacingError(error)),
+  });
+
   const saveMut = useMutation({
     mutationFn: async (values: { title: string; summary?: string; content: string }) => {
       const title = docTitleField.parse(values.title);
@@ -79,22 +98,30 @@ export function KnowledgeBaseDetailPage() {
       setEditingId(null);
       form.resetFields();
       await qc.invalidateQueries({ queryKey: ["documents", id] });
+      await qc.invalidateQueries({ queryKey: ["document", id] });
     },
-    onError: (e: Error) => message.error(e.message || i18n.common.unknownError),
+    onError: (e: Error) => message.error(getUserFacingError(e)),
   });
 
   const deleteMut = useMutation({
     mutationFn: (docId: string) => deleteDocument(id, docId),
+    onError: (error) => message.error(getUserFacingError(error)),
     onSuccess: async () => {
       message.success(i18n.common.success);
+      if (page > 0 && docsQuery.data?.items.length === 1) setPage(page - 1);
       await qc.invalidateQueries({ queryKey: ["documents", id] });
+      await qc.invalidateQueries({ queryKey: ["document", id] });
     },
   });
 
   return (
     <div className={styles.page}>
       <Space direction="vertical" size="large" style={{ width: "100%" }}>
-        <PageState loading={kbQuery.isLoading} error={kbQuery.isError ? i18n.common.unknownError : null}>
+        <PageState
+          onRetry={() => void kbQuery.refetch()}
+          loading={kbQuery.isLoading}
+          error={kbQuery.isError ? getUserFacingError(kbQuery.error) : null}
+        >
           <Card>
             <div className={styles.header}>
               <div>
@@ -106,7 +133,7 @@ export function KnowledgeBaseDetailPage() {
                 </Typography.Paragraph>
               </div>
               <Space wrap>
-                {appEnv.enableKbMembership ? (
+                {appEnv.enableKbMembership && kbQuery.data?.creatorId === user?.userId ? (
                   <Link to={`/knowledge-bases/${id}/members`}>
                     <Button icon={<TeamOutlined />}>{i18n.kb.members}</Button>
                   </Link>
@@ -130,7 +157,7 @@ export function KnowledgeBaseDetailPage() {
         <Card title={i18n.kb.documents}>
           <PageState
             loading={docsQuery.isLoading}
-            error={docsQuery.isError ? i18n.common.unknownError : null}
+            error={docsQuery.isError ? getUserFacingError(docsQuery.error) : null}
             onRetry={() => void docsQuery.refetch()}
             empty={!docsQuery.isLoading && (docsQuery.data?.items.length ?? 0) === 0}
             emptyDescription={i18n.kb.emptyDocs}
@@ -153,23 +180,17 @@ export function KnowledgeBaseDetailPage() {
                     <Button
                       key="edit"
                       type="link"
-                      onClick={async () => {
-                        const full = await getDocument(id, item.id);
-                        setEditingId(item.id);
-                        form.setFieldsValue({
-                          title: full.title,
-                          summary: full.summary ?? "",
-                          content: full.content,
-                        });
-                        setEditorOpen(true);
-                      }}
+                      disabled={editLoad.isPending}
+                      loading={editLoad.isPending && editLoad.variables === item.id}
+                      onClick={() => editLoad.mutate(item.id)}
                     >
                       {i18n.common.edit}
                     </Button>,
                     <ConfirmDeleteButton
                       key="del"
                       title={i18n.kb.deleteDocConfirm}
-                      onConfirm={() => deleteMut.mutateAsync(item.id)}
+                      onConfirm={() => deleteMut.mutate(item.id)}
+                      loading={deleteMut.isPending}
                     />,
                   ]}
                 >
@@ -212,14 +233,18 @@ export function KnowledgeBaseDetailPage() {
         cancelText={i18n.common.cancel}
       >
         <Form form={form} layout="vertical" onFinish={(v) => saveMut.mutate(v)}>
-          <Form.Item name="title" label={i18n.kb.docTitle} rules={[{ required: true }]}>
-            <Input maxLength={200} showCount />
+          <Form.Item name="title" label={i18n.kb.docTitle} rules={[zodFormRule(docTitleField)]}>
+            <Input count={{ show: true, max: 100, strategy: unicodeLength }} showCount />
           </Form.Item>
-          <Form.Item name="summary" label={i18n.kb.summary}>
-            <Input.TextArea maxLength={500} showCount rows={2} />
+          <Form.Item name="summary" label={i18n.kb.summary} rules={[zodFormRule(docSummaryField)]}>
+            <Input.TextArea
+              count={{ show: true, max: 500, strategy: unicodeLength }}
+              showCount
+              rows={2}
+            />
           </Form.Item>
-          <Form.Item name="content" label={i18n.kb.content} rules={[{ required: true }]}>
-            <Input.TextArea rows={10} />
+          <Form.Item name="content" label={i18n.kb.content} rules={[zodFormRule(docContentField)]}>
+            <Input.TextArea rows={10} count={{ show: true, max: 50000, strategy: unicodeLength }} />
           </Form.Item>
         </Form>
       </Modal>
@@ -233,7 +258,11 @@ export function KnowledgeBaseDetailPage() {
         }}
         width={560}
       >
-        <PageState loading={detailQuery.isLoading} error={detailQuery.isError ? i18n.common.unknownError : null}>
+        <PageState
+          onRetry={() => void detailQuery.refetch()}
+          loading={detailQuery.isLoading}
+          error={detailQuery.isError ? getUserFacingError(detailQuery.error) : null}
+        >
           {detailQuery.data?.summary ? (
             <Typography.Paragraph type="secondary">{detailQuery.data.summary}</Typography.Paragraph>
           ) : null}
